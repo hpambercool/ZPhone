@@ -1,9 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
 import { WorldEntry, ChatMessage } from "../types";
 
-// Initialize Gemini Client
-// The key is retrieved from the environment variable.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Safe accessor for environment variables in browser environments
+const getEnvApiKey = () => {
+  try {
+    // @ts-ignore: process might not be defined in browser
+    return process.env.API_KEY;
+  } catch (e) {
+    return undefined;
+  }
+};
 
 export const getGeminiResponseStream = async (
   currentMessage: string,
@@ -12,9 +18,19 @@ export const getGeminiResponseStream = async (
   modelName: string,
   systemPromptOverride?: string,
   _customApiUrl?: string, // Reserved for future implementation
-  _customApiKey?: string  // Reserved for future implementation
+  customApiKey?: string
 ) => {
   try {
+    // Prioritize custom key from settings, then fallback to env
+    const apiKey = customApiKey || getEnvApiKey();
+
+    if (!apiKey) {
+      throw new Error("未检测到 API 密钥。请在‘设置’应用中输入您的 Google Gemini API Key。");
+    }
+
+    // Initialize client per request to support dynamic keys
+    const ai = new GoogleGenAI({ apiKey });
+
     // Construct System Instruction from WorldBook + Settings
     const activeLore = worldBook
       .filter((entry) => entry.active)
