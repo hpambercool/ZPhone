@@ -42,10 +42,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
     return saved ? JSON.parse(saved) : [];
   });
 
-  // UI State for Active Chat
-  // We don't persist activeConversationId strictly to localStorage to allow reset on full reload, 
-  // but we could. For now, we keep it in memory so if you refresh you start at list.
-  // Requirement 3 (Back to main interface doesn't reset) is handled by App.tsx keeping component mounted.
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
   // Chat Room Inputs
@@ -430,7 +426,7 @@ const ChatApp: React.FC<ChatAppProps> = ({
         </div>
 
         {/* Input Area */}
-        <div className="p-3 bg-slate-800 border-t border-white/10 shrink-0">
+        <div className="p-3 bg-slate-800 border-t border-white/10 shrink-0 mb-4">
            <div className="flex items-center gap-2 bg-white/10 rounded-lg px-2 py-2">
              <input
                 value={input}

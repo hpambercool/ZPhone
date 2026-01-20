@@ -1,35 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 import { WorldEntry, ChatMessage } from "../types";
 
-// Safe accessor for environment variables in browser environments
-const getEnvApiKey = () => {
-  try {
-    // @ts-ignore: process might not be defined in browser
-    return process.env.API_KEY;
-  } catch (e) {
-    return undefined;
-  }
-};
+// Always use process.env.API_KEY as per strict guidelines
+const API_KEY = process.env.API_KEY;
 
 export const getGeminiResponseStream = async (
   currentMessage: string,
   history: ChatMessage[],
   worldBook: WorldEntry[],
   modelName: string,
-  systemPromptOverride?: string,
-  _customApiUrl?: string, // Reserved for future implementation
-  customApiKey?: string
+  systemPromptOverride?: string
 ) => {
   try {
-    // Prioritize custom key from settings, then fallback to env
-    const apiKey = customApiKey || getEnvApiKey();
-
-    if (!apiKey) {
-      throw new Error("未检测到 API 密钥。请在‘设置’应用中输入您的 Google Gemini API Key。");
+    if (!API_KEY) {
+      throw new Error("System Environment Error: API Key not configured.");
     }
 
-    // Initialize client per request to support dynamic keys
-    const ai = new GoogleGenAI({ apiKey });
+    // Initialize client
+    const ai = new GoogleGenAI({ apiKey: API_KEY });
 
     // Construct System Instruction from WorldBook + Settings
     const activeLore = worldBook

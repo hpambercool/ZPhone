@@ -20,7 +20,7 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
   return (
     <div className="h-full flex flex-col bg-slate-900/90 text-white">
       {/* Header */}
-      <div className="p-6 pt-12 glass-panel border-b-0 rounded-b-3xl shrink-0 flex justify-between items-center">
+      <div className="p-6 pt-16 glass-panel border-b-0 rounded-b-3xl shrink-0 flex justify-between items-center">
         <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-200 to-gray-400">
           设置
         </h1>
@@ -60,52 +60,28 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
           
           {activeTab === 'general' && (
             <>
-              {/* API Status Section */}
+              {/* System Status */}
               <div className="glass-panel p-5 rounded-2xl">
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">神经引擎配置 (API)</h2>
+                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">系统状态</h2>
                 
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                       <label className="text-sm text-gray-300">API 接入点 (URL)</label>
-                    </div>
-                    <input
-                      type="text"
-                      value={config.customApiUrl || ''}
-                      onChange={(e) => setConfig({ ...config, customApiUrl: e.target.value })}
-                      placeholder="默认 (Google GenAI)"
-                      className="w-full bg-black/40 rounded-lg p-3 text-sm focus:outline-none border border-white/10 text-white placeholder-white/20"
-                    />
-                  </div>
+                <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm text-gray-300">Google Gemini API</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${isKeyPresent ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                        {isKeyPresent ? '已连接 (ENV)' : '未连接'}
+                    </span>
+                </div>
 
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                       <label className="text-sm text-gray-300">API 密钥 (Password)</label>
-                       <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${isKeyPresent ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                         {isKeyPresent ? '系统内置已激活' : '系统内置缺失'}
-                       </span>
-                    </div>
-                    <input
-                      type="password"
-                      value={config.customApiKey || ''}
-                      onChange={(e) => setConfig({ ...config, customApiKey: e.target.value })}
-                      placeholder="自定义密钥 (覆盖系统默认)"
-                      className="w-full bg-black/40 rounded-lg p-3 text-sm focus:outline-none border border-white/10 text-white placeholder-white/20"
-                    />
-                  </div>
-
-                  <div className="pt-2 border-t border-white/10">
-                    <label className="block text-sm text-gray-300 mb-2">活跃模型</label>
-                    <select
-                      value={config.model}
-                      onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                      className="w-full bg-black/40 rounded-lg p-3 text-sm focus:outline-none border border-white/10 text-white"
-                    >
-                      <option value="gemini-3-flash-preview">Gemini 3.0 Flash (高速)</option>
-                      <option value="gemini-3-pro-preview">Gemini 3.0 Pro (智能)</option>
-                      <option value="gemini-2.5-flash-latest">Gemini 2.5 Flash</option>
-                    </select>
-                  </div>
+                <div className="pt-2 border-t border-white/10">
+                  <label className="block text-sm text-gray-300 mb-2">活跃模型</label>
+                  <select
+                    value={config.model}
+                    onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                    className="w-full bg-black/40 rounded-lg p-3 text-sm focus:outline-none border border-white/10 text-white"
+                  >
+                    <option value="gemini-3-flash-preview">Gemini 3.0 Flash (高速)</option>
+                    <option value="gemini-3-pro-preview">Gemini 3.0 Pro (智能)</option>
+                    <option value="gemini-2.5-flash-latest">Gemini 2.5 Flash</option>
+                  </select>
                 </div>
               </div>
 
@@ -130,23 +106,13 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
 
           {activeTab === 'appearance' && (
             <div className="glass-panel p-5 rounded-2xl">
-              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">显示与壁纸</h2>
+              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">显示</h2>
               <div className="flex items-center justify-between mb-4">
                  <span>深色模式</span>
                  <div className="px-3 py-1 bg-white/10 rounded text-xs text-white/50">始终开启</div>
               </div>
-              <div className="mt-4">
-                <label className="block text-sm text-gray-300 mb-2">壁纸风格</label>
-                <div className="grid grid-cols-3 gap-2">
-                   {['bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900', 
-                     'bg-gradient-to-tr from-slate-900 via-gray-800 to-black', 
-                     'bg-gradient-to-bl from-blue-900 via-teal-900 to-emerald-900'].map((bgClass, idx) => (
-                      <button 
-                        key={idx}
-                        className={`h-16 rounded-lg ${bgClass} border-2 ${idx === 0 ? 'border-white' : 'border-transparent'}`} 
-                      />
-                   ))}
-                </div>
+              <div className="p-4 bg-gradient-to-br from-indigo-900 via-purple-900 to-black rounded-lg text-center text-xs text-white/60">
+                 默认 OS 26 动态壁纸已应用
               </div>
             </div>
           )}
@@ -159,7 +125,7 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">OS 26</h3>
-                  <p className="text-xs text-gray-400">版本 1.1 (Beta CN)</p>
+                  <p className="text-xs text-gray-400">版本 1.2 (Beta CN)</p>
                 </div>
               </div>
 
@@ -173,10 +139,6 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
                   <li className="flex gap-2">
                     <span className="text-amber-400 font-bold">2. 世界书:</span>
                     <span className="opacity-80">添加 AI 共享的背景设定知识。</span>
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="text-gray-400 font-bold">3. 自定义 API:</span>
-                    <span className="opacity-80">在设置的通用选项卡中，您可以填写自定义的 API URL 和 密钥。</span>
                   </li>
                 </ul>
               </div>
