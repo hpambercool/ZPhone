@@ -47,9 +47,17 @@ export interface ApiPreset {
   model: string;
 }
 
+export interface UserPersona {
+  id: string;
+  name: string;
+  avatar: string; // Tailwind bg class
+}
+
 export interface AppConfig {
   model: string;
   userName: string;
+  userPersonas?: UserPersona[]; // List of available personas
+  currentPersonaId?: string;    // Currently active persona ID
   systemPrompt: string; // Default system prompt
   customApiUrl?: string;
   customApiKey?: string;

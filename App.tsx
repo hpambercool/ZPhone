@@ -11,6 +11,10 @@ import { AppConfig, WorldEntry, ThemeMode, Contact } from './types';
 const DEFAULT_CONFIG: AppConfig = {
   model: 'gemini-3-flash-preview',
   userName: 'User',
+  currentPersonaId: 'default-user',
+  userPersonas: [
+    { id: 'default-user', name: 'User', avatar: 'bg-gradient-to-br from-indigo-500 to-purple-600' }
+  ],
   systemPrompt: '你是一个集成在 OS 26 中的高级 AI 助手。你的回答简洁、智能且乐于助人。',
   presets: [],
   customApiUrl: '',
@@ -21,7 +25,7 @@ const DEFAULT_CONFIG: AppConfig = {
 const INITIAL_CONTACTS: Contact[] = [
   {
     id: 'ai-assistant',
-    name: 'OS 26 助手',
+    name: 'ski小助手',
     avatar: 'bg-blue-600',
     bio: '官方系统智能助手',
     systemPrompt: '你是一个乐于助人、智能且冷静的 AI 助手。'
@@ -38,7 +42,20 @@ const App = () => {
   const [config, setConfig] = useState<AppConfig>(() => {
     const saved = localStorage.getItem('os26_config');
     // Merge with default to ensure new fields exist if loading old data
-    return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : DEFAULT_CONFIG;
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Ensure userPersonas exists for backward compatibility
+      if (!parsed.userPersonas) {
+        parsed.userPersonas = [{ 
+          id: 'default-user', 
+          name: parsed.userName || 'User', 
+          avatar: 'bg-gradient-to-br from-indigo-500 to-purple-600' 
+        }];
+        parsed.currentPersonaId = 'default-user';
+      }
+      return { ...DEFAULT_CONFIG, ...parsed };
+    }
+    return DEFAULT_CONFIG;
   });
 
   // WorldBook State (Shared Data)
@@ -92,7 +109,7 @@ const App = () => {
   // Common wrapper for Apps to handle the slide animation and background
   const AppWindow = ({ show, children }: { show: boolean, children: React.ReactNode }) => (
     <div 
-      className={`absolute inset-0 z-20 flex flex-col transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
+      className={`fixed inset-0 z-20 flex flex-col w-full h-[100dvh] overflow-hidden transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
         show ? 'translate-y-0' : 'translate-y-full pointer-events-none'
       } ${theme === 'dark' ? 'bg-black' : 'bg-[#F2F2F7]'}`}
     >
@@ -105,7 +122,7 @@ const App = () => {
 
   return (
     <div 
-      className={`w-full h-full relative overflow-hidden bg-slate-900 ${!config.wallpaper ? wallpaperClass : ''}`}
+      className={`w-full h-[100dvh] relative overflow-hidden bg-slate-900 ${!config.wallpaper ? wallpaperClass : ''}`}
       style={backgroundStyle}
     >
       {/* Overlay Noise Texture for realism */}
@@ -124,6 +141,7 @@ const App = () => {
       <AppWindow show={isVisible('/chat')}>
         <ChatApp 
           config={config} 
+          setConfig={setConfig}
           worldBook={worldBook}
           contacts={contacts}
           setContacts={setContacts}
