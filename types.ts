@@ -9,6 +9,10 @@ export interface WorldEntry {
   title: string;
   content: string;
   active: boolean;
+  category?: string;
+  triggerKeywords?: string[];
+  scope?: 'global' | 'character';
+  characterId?: string;
 }
 
 export interface ChatMessage {

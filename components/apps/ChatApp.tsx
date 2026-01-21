@@ -8,23 +8,16 @@ import { GenerateContentResponse } from '@google/genai';
 interface ChatAppProps {
   config: AppConfig;
   worldBook: WorldEntry[];
+  contacts: Contact[];
+  setContacts: React.Dispatch<React.SetStateAction<Contact[]>>;
   theme?: ThemeMode;
 }
-
-// Initial Mock Data
-const INITIAL_CONTACTS: Contact[] = [
-  {
-    id: 'ai-assistant',
-    name: 'OS 26 助手',
-    avatar: 'bg-blue-600',
-    bio: '官方系统智能助手',
-    systemPrompt: '你是一个乐于助人、智能且冷静的 AI 助手。'
-  }
-];
 
 const ChatApp: React.FC<ChatAppProps> = ({ 
   config, 
   worldBook,
+  contacts,
+  setContacts,
   theme = 'dark'
 }) => {
   const navigate = useNavigate();
@@ -40,18 +33,11 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const bgMyMessage = 'bg-green-600 text-white';
   const bgOtherMessage = isDark ? 'bg-white text-black' : 'bg-white text-black shadow-sm';
   const bgInputArea = isDark ? 'bg-slate-800 border-white/10' : 'bg-[#F2F2F7] border-slate-200';
-  const bgInputField = isDark ? 'bg-white/10 text-white placeholder-white/30' : 'bg-white text-slate-900 placeholder-slate-400';
-
+  
   // --- Local Persistent State ---
   // Navigation State (UI State)
   const [activeTab, setActiveTab] = useState<'chats' | 'contacts' | 'me'>('chats');
   
-  // Data State (loaded from localStorage)
-  const [contacts, setContacts] = useState<Contact[]>(() => {
-    const saved = localStorage.getItem('os26_contacts');
-    return saved ? JSON.parse(saved) : INITIAL_CONTACTS;
-  });
-
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const saved = localStorage.getItem('os26_conversations');
     return saved ? JSON.parse(saved) : [];
@@ -70,11 +56,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const [newContactPrompt, setNewContactPrompt] = useState('');
 
   // --- Effects ---
-
-  // Persistence
-  useEffect(() => {
-    localStorage.setItem('os26_contacts', JSON.stringify(contacts));
-  }, [contacts]);
 
   useEffect(() => {
     localStorage.setItem('os26_conversations', JSON.stringify(conversations));
@@ -177,11 +158,31 @@ const ChatApp: React.FC<ChatAppProps> = ({
       }));
 
       const specificPrompt = contact.systemPrompt;
+      
+      // Filter WorldBook based on Scope and Keywords
+      const relevantWorldBook = worldBook.filter(entry => {
+        if (!entry.active) return false;
+        
+        // 1. Scope Check
+        // If scope is 'character', it must match the current contactId.
+        if (entry.scope === 'character' && entry.characterId !== contact.id) return false;
+        
+        // 2. Keyword Check
+        // If triggerKeywords exist and are not empty, only activate if the User's Message contains one of them.
+        // If no keywords are defined, it is active by default (Context/Lore).
+        if (entry.triggerKeywords && entry.triggerKeywords.length > 0) {
+           const textToCheck = userMsg.text.toLowerCase();
+           const hasMatch = entry.triggerKeywords.some(kw => textToCheck.includes(kw.toLowerCase()));
+           if (!hasMatch) return false;
+        }
+
+        return true;
+      });
 
       const stream = await getGeminiResponseStream(
         userMsg.text,
         currentConv.messages,
-        worldBook,
+        relevantWorldBook,
         config, 
         specificPrompt
       );

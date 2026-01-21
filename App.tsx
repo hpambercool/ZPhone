@@ -5,7 +5,7 @@ import Desktop from './components/Desktop';
 import ChatApp from './components/apps/ChatApp';
 import SettingsApp from './components/apps/SettingsApp';
 import WorldBookApp from './components/apps/WorldBookApp';
-import { AppConfig, WorldEntry, ThemeMode } from './types';
+import { AppConfig, WorldEntry, ThemeMode, Contact } from './types';
 
 // Default Configurations
 const DEFAULT_CONFIG: AppConfig = {
@@ -17,6 +17,16 @@ const DEFAULT_CONFIG: AppConfig = {
   customApiKey: '',
   wallpaper: undefined
 };
+
+const INITIAL_CONTACTS: Contact[] = [
+  {
+    id: 'ai-assistant',
+    name: 'OS 26 助手',
+    avatar: 'bg-blue-600',
+    bio: '官方系统智能助手',
+    systemPrompt: '你是一个乐于助人、智能且冷静的 AI 助手。'
+  }
+];
 
 const App = () => {
   const location = useLocation();
@@ -37,6 +47,12 @@ const App = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Contacts State (Shared Data)
+  const [contacts, setContacts] = useState<Contact[]>(() => {
+    const saved = localStorage.getItem('os26_contacts');
+    return saved ? JSON.parse(saved) : INITIAL_CONTACTS;
+  });
+
   // Theme State
   const [theme, setTheme] = useState<ThemeMode>(() => {
     return (localStorage.getItem('os26_theme') as ThemeMode) || 'dark';
@@ -50,6 +66,10 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('os26_worldbook', JSON.stringify(worldBook));
   }, [worldBook]);
+
+  useEffect(() => {
+    localStorage.setItem('os26_contacts', JSON.stringify(contacts));
+  }, [contacts]);
 
   useEffect(() => {
     localStorage.setItem('os26_theme', theme);
@@ -105,6 +125,8 @@ const App = () => {
         <ChatApp 
           config={config} 
           worldBook={worldBook}
+          contacts={contacts}
+          setContacts={setContacts}
           theme={theme}
         />
       </AppWindow>
@@ -114,6 +136,7 @@ const App = () => {
         <WorldBookApp 
           entries={worldBook} 
           setEntries={setWorldBook} 
+          contacts={contacts}
           closeApp={noopClose}
           theme={theme}
         />
