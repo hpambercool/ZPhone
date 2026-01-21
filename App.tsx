@@ -12,6 +12,10 @@ const DEFAULT_CONFIG: AppConfig = {
   model: 'gemini-3-flash-preview',
   userName: 'User',
   systemPrompt: '你是一个集成在 OS 26 中的高级 AI 助手。你的回答简洁、智能且乐于助人。',
+  presets: [],
+  customApiUrl: '',
+  customApiKey: '',
+  wallpaper: undefined
 };
 
 const App = () => {
@@ -23,7 +27,8 @@ const App = () => {
   // Config State
   const [config, setConfig] = useState<AppConfig>(() => {
     const saved = localStorage.getItem('os26_config');
-    return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
+    // Merge with default to ensure new fields exist if loading old data
+    return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : DEFAULT_CONFIG;
   });
 
   // WorldBook State (Shared Data)
@@ -52,6 +57,10 @@ const App = () => {
 
   // iOS 26 Abstract Wallpaper
   const wallpaperClass = "bg-[radial-gradient(circle_at_50%_120%,#3b0764, #1e1b4b 40%, #020617 80%)]";
+  
+  const backgroundStyle = config.wallpaper 
+    ? { backgroundImage: `url(${config.wallpaper})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : {};
 
   // Check valid paths for desktop blur effect
   const validAppPaths = ['/chat', '/settings', '/worldbook'];
@@ -63,9 +72,9 @@ const App = () => {
   // Common wrapper for Apps to handle the slide animation and background
   const AppWindow = ({ show, children }: { show: boolean, children: React.ReactNode }) => (
     <div 
-      className={`absolute inset-0 z-20 flex flex-col bg-black transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
+      className={`absolute inset-0 z-20 flex flex-col transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
         show ? 'translate-y-0' : 'translate-y-full pointer-events-none'
-      }`}
+      } ${theme === 'dark' ? 'bg-black' : 'bg-[#F2F2F7]'}`}
     >
       {children}
       <HomeIndicator onClick={() => navigate('/')} />
@@ -75,7 +84,10 @@ const App = () => {
   const noopClose = () => {};
 
   return (
-    <div className={`w-full h-full relative overflow-hidden bg-slate-900 ${wallpaperClass}`}>
+    <div 
+      className={`w-full h-full relative overflow-hidden bg-slate-900 ${!config.wallpaper ? wallpaperClass : ''}`}
+      style={backgroundStyle}
+    >
       {/* Overlay Noise Texture for realism */}
       <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }}></div>
 
@@ -93,6 +105,7 @@ const App = () => {
         <ChatApp 
           config={config} 
           worldBook={worldBook}
+          theme={theme}
         />
       </AppWindow>
 
@@ -102,6 +115,7 @@ const App = () => {
           entries={worldBook} 
           setEntries={setWorldBook} 
           closeApp={noopClose}
+          theme={theme}
         />
       </AppWindow>
 

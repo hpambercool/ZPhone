@@ -35,12 +35,22 @@ export interface Conversation {
   unreadCount: number;
 }
 
+export interface ApiPreset {
+  id: string;
+  name: string;
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}
+
 export interface AppConfig {
   model: string;
   userName: string;
   systemPrompt: string; // Default system prompt
   customApiUrl?: string;
   customApiKey?: string;
+  presets: ApiPreset[];
+  wallpaper?: string;
 }
 
 export type ThemeMode = 'light' | 'dark';

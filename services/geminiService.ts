@@ -1,23 +1,57 @@
 import { GoogleGenAI } from "@google/genai";
-import { WorldEntry, ChatMessage } from "../types";
+import { WorldEntry, ChatMessage, AppConfig } from "../types";
 
-// Always use process.env.API_KEY as per strict guidelines
-const API_KEY = process.env.API_KEY;
+const ENV_API_KEY = process.env.API_KEY;
+
+/**
+ * Creates a configured GoogleGenAI instance.
+ * Priorities: 
+ * 1. Custom config passed in (from settings)
+ * 2. Environment variable
+ */
+const createClient = (customUrl?: string, customKey?: string) => {
+  const apiKey = customKey?.trim() || ENV_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("System Environment Error: API Key not configured.");
+  }
+
+  const options: any = { apiKey };
+  if (customUrl?.trim()) {
+    options.baseUrl = customUrl.trim();
+  }
+
+  return new GoogleGenAI(options);
+};
+
+export const validateAndListModels = async (apiUrl: string, apiKey: string) => {
+  try {
+    const ai = createClient(apiUrl, apiKey);
+    const response = await ai.models.list();
+    // The SDK structure for list() response might vary, usually it returns an object with `models` array
+    // We map it to a simple string array of names
+    if (response && Array.isArray(response)) {
+        return response.map((m: any) => m.name.replace('models/', ''));
+    } else if (response && (response as any).models) {
+        return (response as any).models.map((m: any) => m.name.replace('models/', ''));
+    }
+    return [];
+  } catch (error) {
+    console.error("Failed to list models:", error);
+    throw error;
+  }
+};
 
 export const getGeminiResponseStream = async (
   currentMessage: string,
   history: ChatMessage[],
   worldBook: WorldEntry[],
-  modelName: string,
+  config: AppConfig,
   systemPromptOverride?: string
 ) => {
   try {
-    if (!API_KEY) {
-      throw new Error("System Environment Error: API Key not configured.");
-    }
-
-    // Initialize client
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    // Initialize client using config settings or fallback
+    const ai = createClient(config.customApiUrl, config.customApiKey);
 
     // Construct System Instruction from WorldBook + Settings
     const activeLore = worldBook
@@ -37,7 +71,7 @@ export const getGeminiResponseStream = async (
     }));
 
     const chat = ai.chats.create({
-      model: modelName,
+      model: config.model,
       history: historyForGemini,
       config: {
         systemInstruction: finalSystemInstruction,
