@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconChat, IconSettings, IconBook } from './Icons';
 import { ThemeMode } from '../types';
@@ -17,16 +17,18 @@ interface AppItem {
   isMock?: boolean;
 }
 
+// --- Physics Constants ---
+const SPRING_CONFIG = { stiffness: 300, damping: 30 };
+const SWAP_THRESHOLD = 0.5; // Over-half swap
+const FOLDER_HOVER_DELAY = 600; // ms to trigger folder detection
+const EDGE_SCROLL_ZONE = 100; // px
+const TRAJECTORY_LOOKAHEAD = 100; // ms of velocity to project
+
 const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const navigate = useNavigate();
-  const [isJiggleMode, setIsJiggleMode] = useState(false);
-  const [activeDragIndex, setActiveDragIndex] = useState<number | null>(null);
-  const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
   
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
-  const touchStartPos = useRef<{x: number, y: number} | null>(null);
-  const longPressTriggered = useRef(false);
-
+  // -- State --
   const [apps, setApps] = useState<AppItem[]>([
     { 
       id: 'chat', 
@@ -59,99 +61,236 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     }
   ]);
 
-  // Clean up timer on unmount
-  useEffect(() => {
-    return () => {
-      if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    };
-  }, []);
+  const [isJiggleMode, setIsJiggleMode] = useState(false);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  
+  // -- Physics Refs (Mutable for 60fps performance) --
+  const dragState = useRef({
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    velocityX: 0,
+    velocityY: 0,
+    lastTime: 0,
+    initialIndex: -1,
+    folderTimer: null as NodeJS.Timeout | null,
+    folderTargetId: null as string | null,
+  });
 
-  const handleTouchStart = (e: React.TouchEvent, index: number) => {
-    // We do NOT prevent default here to allow click events for normal taps.
-    const touch = e.touches[0];
-    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-    longPressTriggered.current = false; // Reset trigger state
+  const [visualDragPos, setVisualDragPos] = useState({ x: 0, y: 0 }); // React state for render
+  const [folderTargetId, setFolderTargetId] = useState<string | null>(null); // For visual scaling
 
-    if (isJiggleMode) {
-        setActiveDragIndex(index);
-    } else {
-        longPressTimer.current = setTimeout(() => {
-            longPressTriggered.current = true; // Mark as triggered so onClick can ignore
+  // -- Layout Calculations --
+  const getGridMetrics = () => {
+    if (!containerRef.current) return { colWidth: 90, rowHeight: 110, cols: 4 };
+    const width = containerRef.current.clientWidth;
+    const cols = 4;
+    const colWidth = width / cols;
+    const rowHeight = colWidth * 1.25;
+    return { colWidth, rowHeight, cols };
+  };
+
+  const getPositionAtIndex = (index: number) => {
+    const { colWidth, rowHeight, cols } = getGridMetrics();
+    const row = Math.floor(index / cols);
+    const col = index % cols;
+    return { x: col * colWidth, y: row * rowHeight };
+  };
+
+  // -- Haptic Patterns --
+  const triggerHaptic = (type: 'pickup' | 'swap' | 'drop' | 'folder' | 'jiggle') => {
+    if (!navigator.vibrate) return;
+    switch (type) {
+        case 'pickup': navigator.vibrate(15); break;
+        case 'swap': navigator.vibrate(10); break;
+        case 'drop': navigator.vibrate(12); break;
+        case 'folder': navigator.vibrate([5, 10, 15]); break;
+        case 'jiggle': navigator.vibrate(50); break;
+    }
+  };
+
+  // -- Event Handlers --
+
+  const handlePointerDown = (e: React.PointerEvent, app: AppItem, index: number) => {
+    // Only left click or touch
+    if (e.button !== 0) return;
+    
+    const { clientX, clientY } = e;
+    
+    // Setup Drag State
+    dragState.current.startX = clientX;
+    dragState.current.startY = clientY;
+    dragState.current.currentX = clientX;
+    dragState.current.currentY = clientY;
+    dragState.current.lastTime = Date.now();
+    dragState.current.velocityX = 0;
+    dragState.current.velocityY = 0;
+    dragState.current.initialIndex = index;
+    
+    // Long Press Logic for Jiggle Mode
+    if (!isJiggleMode) {
+        const timer = setTimeout(() => {
             setIsJiggleMode(true);
-            if (navigator.vibrate) navigator.vibrate(50);
+            setActiveDragId(app.id);
+            triggerHaptic('jiggle');
         }, 500);
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    const currentX = touch.clientX;
-    const currentY = touch.clientY;
-
-    // Check movement to cancel long press if not yet in jiggle mode
-    if (longPressTimer.current && touchStartPos.current && !isJiggleMode) {
-        const dx = currentX - touchStartPos.current.x;
-        const dy = currentY - touchStartPos.current.y;
-        // Increased tolerance to 15px for shaky fingers
-        if (Math.abs(dx) > 15 || Math.abs(dy) > 15) {
-            clearTimeout(longPressTimer.current);
-            longPressTimer.current = null;
-        }
-    }
-
-    // Drag Logic
-    if (isJiggleMode && activeDragIndex !== null && touchStartPos.current) {
-        if (e.cancelable) e.preventDefault(); // Stop scrolling while reordering
-
-        const dx = currentX - touchStartPos.current.x;
-        const dy = currentY - touchStartPos.current.y;
-        setDragPosition({ x: dx, y: dy });
-
-        // Hit testing for swap
-        // We use elementFromPoint to find which app slot we are hovering over.
-        // We hide the dragged element via pointer-events: none style (see render) so we can hit what's behind it.
-        const targetEl = document.elementFromPoint(currentX, currentY);
-        const appItem = targetEl?.closest('[data-app-index]');
         
-        if (appItem && appItem instanceof HTMLElement) {
-            const targetIndex = parseInt(appItem.dataset.appIndex || '-1', 10);
-            if (targetIndex !== -1 && targetIndex !== activeDragIndex) {
-                 // Perform Swap
-                 setApps(prev => {
-                     const newApps = [...prev];
-                     const [removed] = newApps.splice(activeDragIndex, 1);
-                     newApps.splice(targetIndex, 0, removed);
-                     return newApps;
-                 });
-                 setActiveDragIndex(targetIndex);
-                 
-                 // Reset drag reference to avoid visual jump after swap re-layout
-                 touchStartPos.current = { x: currentX, y: currentY };
-                 setDragPosition({ x: 0, y: 0 });
-                 if (navigator.vibrate) navigator.vibrate(10);
-            }
+        // Store cancel function on element or ref implies complexity, 
+        // simplifying by assuming move cancels standard click, timer activates jiggle.
+        dragState.current.folderTimer = timer; 
+    } else {
+        setActiveDragId(app.id);
+        triggerHaptic('pickup');
+    }
+
+    // Capture pointer
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const { clientX, clientY } = e;
+    const dx = clientX - dragState.current.startX;
+    const dy = clientY - dragState.current.startY;
+
+    // Cancel long press if moved significantly
+    if (dragState.current.folderTimer && !isJiggleMode && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+        clearTimeout(dragState.current.folderTimer);
+        dragState.current.folderTimer = null;
+    }
+
+    if (activeDragId) {
+        // 1. Calculate Velocity (Velocity Differentiation)
+        const now = Date.now();
+        const dt = now - dragState.current.lastTime;
+        if (dt > 0) {
+            const vx = (clientX - dragState.current.currentX) / dt;
+            const vy = (clientY - dragState.current.currentY) / dt;
+            // Smooth velocity
+            dragState.current.velocityX = vx * 0.8 + dragState.current.velocityX * 0.2;
+            dragState.current.velocityY = vy * 0.8 + dragState.current.velocityY * 0.2;
+        }
+        dragState.current.currentX = clientX;
+        dragState.current.currentY = clientY;
+        dragState.current.lastTime = now;
+
+        // 2. Update Visual Position
+        setVisualDragPos({ x: dx, y: dy });
+
+        // 3. Edge Scroll
+        const winH = window.innerHeight;
+        if (clientY < EDGE_SCROLL_ZONE) {
+            window.scrollBy(0, -5);
+        } else if (clientY > winH - EDGE_SCROLL_ZONE) {
+            window.scrollBy(0, 5);
+        }
+
+        // 4. Swap Logic (Trajectory-Aware & Over-half)
+        performSwapCheck(activeDragId, dx, dy);
+    }
+  };
+
+  const performSwapCheck = (dragId: string, dx: number, dy: number) => {
+    const { colWidth, rowHeight, cols } = getGridMetrics();
+    const currentIndex = apps.findIndex(a => a.id === dragId);
+    if (currentIndex === -1) return;
+
+    const currentOrigin = getPositionAtIndex(currentIndex);
+    
+    // Trajectory Projection
+    const projectedX = currentOrigin.x + dx + (dragState.current.velocityX * TRAJECTORY_LOOKAHEAD);
+    const projectedY = currentOrigin.y + dy + (dragState.current.velocityY * TRAJECTORY_LOOKAHEAD);
+
+    // Find Target Cell based on geometry
+    // Center point of the dragging item
+    const centerX = projectedX + colWidth / 2;
+    const centerY = projectedY + rowHeight / 2;
+
+    const targetCol = Math.floor(centerX / colWidth);
+    const targetRow = Math.floor(centerY / rowHeight);
+    const targetIndex = targetRow * cols + targetCol;
+
+    // Bounds Check
+    if (targetIndex >= 0 && targetIndex < apps.length && targetIndex !== currentIndex) {
+        
+        // Over-half Logic: Distance Check
+        const targetOrigin = getPositionAtIndex(targetIndex);
+        const overlapX = Math.abs(centerX - (targetOrigin.x + colWidth / 2));
+        const overlapY = Math.abs(centerY - (targetOrigin.y + rowHeight / 2));
+        
+        // If overlap is significant (close to center) OR velocity is high towards it
+        const isSwapThreshold = (overlapX < colWidth * SWAP_THRESHOLD) && (overlapY < rowHeight * SWAP_THRESHOLD);
+        
+        if (isSwapThreshold) {
+             // Reset folder detection if we are swapping
+             if (dragState.current.folderTimer && isJiggleMode) {
+                 clearTimeout(dragState.current.folderTimer);
+                 dragState.current.folderTimer = null;
+                 setFolderTargetId(null);
+             }
+
+             // Execute Swap
+             const newApps = [...apps];
+             const [movedItem] = newApps.splice(currentIndex, 1);
+             newApps.splice(targetIndex, 0, movedItem);
+             setApps(newApps);
+             
+             // Haptic
+             triggerHaptic('swap');
+
+             // Adjust start pos so the icon doesn't jump visually under the cursor
+             // The new visual origin changed, so we subtract that change from our drag offset
+             const newOrigin = getPositionAtIndex(targetIndex);
+             dragState.current.startX += (newOrigin.x - currentOrigin.x);
+             dragState.current.startY += (newOrigin.y - currentOrigin.y);
+             
+             // Recalculate visual pos immediately
+             const newDx = dragState.current.currentX - dragState.current.startX;
+             const newDy = dragState.current.currentY - dragState.current.startY;
+             setVisualDragPos({ x: newDx, y: newDy });
+        } else {
+             // Folder Detection Logic (Multi-layout flow pause)
+             // If we are hovering STABLY over another item (not swapping yet)
+             if (!dragState.current.folderTimer && isJiggleMode) {
+                 dragState.current.folderTimer = setTimeout(() => {
+                     // Trigger folder visual
+                     setFolderTargetId(apps[targetIndex].id);
+                     triggerHaptic('folder');
+                 }, FOLDER_HOVER_DELAY);
+                 dragState.current.folderTargetId = apps[targetIndex].id;
+             } else if (dragState.current.folderTargetId !== apps[targetIndex].id) {
+                 // Moved away
+                 if (dragState.current.folderTimer) clearTimeout(dragState.current.folderTimer);
+                 dragState.current.folderTimer = null;
+                 setFolderTargetId(null);
+                 dragState.current.folderTargetId = null;
+             }
         }
     }
   };
 
-  const handleTouchEnd = () => {
-    if (longPressTimer.current) {
-        clearTimeout(longPressTimer.current);
-        longPressTimer.current = null;
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (dragState.current.folderTimer) {
+        clearTimeout(dragState.current.folderTimer);
+        dragState.current.folderTimer = null;
     }
-    setActiveDragIndex(null);
-    setDragPosition({ x: 0, y: 0 });
-    // Note: We do NOT reset longPressTriggered here, because onClick fires after onTouchEnd.
+    setFolderTargetId(null);
+
+    if (activeDragId) {
+        // Magnetic Slot: Snap to grid
+        setActiveDragId(null);
+        setVisualDragPos({ x: 0, y: 0 }); // Reset visual offset, CSS layout takes over
+        triggerHaptic('drop');
+    } else {
+        // It was a click, not a drag
+        const app = apps.find(a => apps.indexOf(a) === dragState.current.initialIndex);
+        if (app && !isJiggleMode) {
+            handleAppClick(app);
+        }
+    }
   };
 
   const handleAppClick = (app: AppItem) => {
-    // If we just triggered a long press, do NOT enter the app
-    if (longPressTriggered.current) {
-        longPressTriggered.current = false; // Reset for next time
-        return;
-    }
-    if (isJiggleMode) return;
-    
     if (!app.isMock && app.path) {
       navigate(app.path);
     }
@@ -162,6 +301,13 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
      e.preventDefault();
      setApps(prev => prev.filter(app => app.id !== id));
   };
+
+  // --- Render Helpers ---
+
+  const isLight = theme === 'light';
+  const textColor = isLight ? 'text-black' : 'text-white';
+  const textSubColor = isLight ? 'text-black/80' : 'text-white/80';
+  const textShadow = isLight ? '' : 'shadow-black drop-shadow-md';
 
   const renderDockIcon = (path: string, icon: React.ReactNode, color: string) => (
     <button
@@ -182,18 +328,13 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     </button>
   );
 
-  const isLight = theme === 'light';
-  const textColor = isLight ? 'text-black' : 'text-white';
-  const textSubColor = isLight ? 'text-black/80' : 'text-white/80';
-  const textShadow = isLight ? '' : 'shadow-black drop-shadow-md';
-
   return (
     <>
       {/* Background Tap Area to exit Jiggle Mode */}
       {isJiggleMode && (
         <div 
            className="absolute inset-0 z-0" 
-           onClick={() => setIsJiggleMode(false)}
+           onPointerDown={() => setIsJiggleMode(false)}
         ></div>
       )}
 
@@ -222,68 +363,65 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
            </p>
         </div>
 
-        {/* App Grid */}
-        <div className="grid grid-cols-4 gap-6 px-2 relative z-10 select-none">
+        {/* App Grid - Absolute Layout */}
+        <div 
+            ref={containerRef}
+            className="relative w-full h-[400px] select-none"
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+        >
           {apps.map((app, index) => {
-            const isDragging = index === activeDragIndex;
+            const isDragging = app.id === activeDragId;
+            const isFolderTarget = app.id === folderTargetId;
+            const pos = getPositionAtIndex(index);
+            
+            // Layout Style
+            const style: React.CSSProperties = {
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: '25%', // 4 cols
+                height: '110px',
+                transform: isDragging 
+                    ? `translate3d(${pos.x + visualDragPos.x}px, ${pos.y + visualDragPos.y}px, 0) scale(1.15)`
+                    : `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${isFolderTarget ? 0.9 : 1})`,
+                zIndex: isDragging ? 50 : 1,
+                transition: isDragging ? 'none' : 'transform 0.4s cubic-bezier(0.25, 1, 0.5, 1)', // Spring-like CSS
+                touchAction: 'none', // Critical for pointer events
+            };
+
             return (
               <div
                 key={app.id}
-                data-app-index={index}
-                onTouchStart={(e) => handleTouchStart(e, index)}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                // Also support mouse for desktop testing
-                onMouseDown={(e) => {
-                    // Simple mouse support for testing, not full drag
-                    if (isJiggleMode) setActiveDragIndex(index);
-                }}
-                onClick={() => handleAppClick(app)}
-                onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }}
-                // Important Styles for iOS
-                style={{ 
-                    WebkitTouchCallout: 'none',
-                    WebkitUserSelect: 'none',
-                    userSelect: 'none',
-                    touchAction: isDragging ? 'none' : 'auto', // Prevent browser gestures only when dragging
-                    ...(isDragging ? { 
-                        transform: `translate(${dragPosition.x}px, ${dragPosition.y}px) scale(1.1)`, 
-                        zIndex: 50,
-                        pointerEvents: 'none' // allow hit testing through
-                    } : {})
-                }}
-                className={`flex flex-col items-center gap-2 group transition-transform duration-200 relative ${
-                  isDragging ? '' : (isJiggleMode ? '' : 'hover:scale-105 active:scale-95')
-                } ${app.isMock ? 'opacity-90' : ''}`}
+                onPointerDown={(e) => handlePointerDown(e, app, index)}
+                style={style}
+                className="flex flex-col items-center justify-start pt-2"
               >
                 <div 
-                  className={`w-16 h-16 rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg transition-all border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
-                  style={{ animationDelay: `${Math.random() * -0.5}s` }}
+                  className={`w-16 h-16 rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
+                  style={{ animationDelay: `${(index * 0.1) % 1}s` }}
                 >
                   {app.icon}
                   
                   {/* Delete Badge */}
                   {isJiggleMode && (
                      <button 
-                       onClick={(e) => removeApp(e, app.id)}
-                       onTouchEnd={(e) => removeApp(e, app.id)}
-                       className="absolute -top-2 -left-2 w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white border border-white z-20 hover:bg-red-500 transition-colors pointer-events-auto"
+                       onPointerDown={(e) => removeApp(e, app.id)}
+                       className="absolute -top-2 -left-2 w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white border border-white z-20 hover:bg-red-500 transition-colors"
                      >
                        <span className="w-3 h-0.5 bg-white"></span>
                      </button>
                   )}
                 </div>
-                <span className={`text-xs font-medium ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`} style={{ animationDelay: `${Math.random() * -0.5}s` }}>{app.label}</span>
+                <span className={`text-xs font-medium mt-2 ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`}>{app.label}</span>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Dock */}
+      {/* Dock (Priority Slot) */}
       <div className={`absolute bottom-6 left-4 right-4 h-24 glass-panel rounded-[2.5rem] flex items-center justify-around px-6 transition-all duration-500 transform ${isBlurred ? 'translate-y-40' : 'translate-y-0'} z-20`}>
          {renderDockIcon('/chat', <IconChat className="w-6 h-6 text-white" />, 'bg-blue-500/40')}
          {renderDockIcon('/worldbook', <IconBook className="w-6 h-6 text-amber-100" />, 'bg-amber-600/40')}

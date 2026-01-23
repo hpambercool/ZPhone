@@ -71,6 +71,26 @@ const IconBill = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const IconMoments = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z" />
+  </svg>
+);
+
+const IconCamera = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="4" />
+  </svg>
+);
+
+const IconHeart = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+  </svg>
+);
+
 // --- Wallet Types ---
 interface Transaction {
   id: string;
@@ -148,6 +168,7 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const wcInputBg = isDark ? 'bg-[#1E1E1E] border-white/5' : 'bg-[#F7F7F7] border-[#DCDCDC]';
   const wcBubbleUser = isDark ? 'bg-[#2EA043] text-white' : 'bg-[#95EC69] text-black';
   const wcBubbleOther = isDark ? 'bg-[#2C2C2C] text-white' : 'bg-white text-black';
+  const wcBlueText = isDark ? 'text-[#7D90A9]' : 'text-[#576b95]';
   
   // --- Routing Logic ---
   const pathname = location.pathname;
@@ -158,6 +179,7 @@ const ChatApp: React.FC<ChatAppProps> = ({
 
   const activeTab = useMemo(() => {
     if (pathname.startsWith('/chat/contacts')) return 'contacts';
+    if (pathname.startsWith('/chat/moments')) return 'moments';
     if (pathname.startsWith('/chat/me')) return 'me';
     return 'chats';
   }, [pathname]);
@@ -959,6 +981,128 @@ const ChatApp: React.FC<ChatAppProps> = ({
       </div>
   );
 
+  const renderMoments = () => (
+      <div className={`flex-1 overflow-y-auto no-scrollbar relative -mt-0 ${bgMain}`}> 
+          {/* Custom Header Overlay for Moments */}
+          <div className="absolute top-0 left-0 right-0 h-24 pt-8 px-4 flex justify-between items-center z-20 pointer-events-none">
+              <div className="pointer-events-auto">
+                 <button onClick={() => navigate('/chat')} className="p-2 -ml-2 rounded-full bg-black/10 backdrop-blur-sm text-white opacity-80 hover:opacity-100">
+                    <IconChevronLeft className="w-5 h-5" />
+                 </button>
+              </div>
+              <div className="pointer-events-auto">
+                 <button className="p-2 rounded-full bg-black/10 backdrop-blur-sm text-white opacity-80 hover:opacity-100">
+                    <IconCamera className="w-6 h-6" />
+                 </button>
+              </div>
+          </div>
+
+          {/* Cover Image Area */}
+          <div className="h-80 w-full relative">
+              <div 
+                 className="w-full h-full bg-cover bg-center" 
+                 style={{ backgroundImage: config.wallpaper ? `url(${config.wallpaper})` : 'none', backgroundColor: '#333' }}
+              ></div>
+              <div className="absolute inset-0 bg-black/10"></div>
+              
+              {/* User Info on Cover */}
+              <div className="absolute bottom-[-30px] right-4 flex items-end gap-3 z-10">
+                  <span className="text-white font-bold text-lg mb-10 drop-shadow-md shadow-black">{config.userName}</span>
+                  <div className={`w-20 h-20 rounded-xl border-2 border-white/10 shadow-lg overflow-hidden ${config.userPersonas?.find(p=>p.id===config.currentPersonaId)?.avatar || 'bg-gray-500'}`}>
+                       {/* Avatar content */}
+                       <div className="w-full h-full flex items-center justify-center text-white text-2xl font-bold">
+                           {config.userName[0]}
+                       </div>
+                  </div>
+              </div>
+          </div>
+
+          {/* Content List */}
+          <div className={`pt-16 pb-20 px-4 min-h-screen ${bgMain}`}>
+             {[
+               {
+                  id: 1,
+                  name: 'ski小助手',
+                  avatar: 'bg-blue-600',
+                  content: '欢迎来到 OS 26！这里是你的智能生活中心。今天天气不错，适合写代码。 🤖 ✨',
+                  images: ['bg-gradient-to-tr from-blue-400 to-purple-500'],
+                  time: '1小时前',
+                  likes: ['User', 'CyberBartender'],
+                  comments: [{ user: 'CyberBartender', text: 'Cheers! 🍸' }]
+               },
+               {
+                  id: 2,
+                  name: 'CyberBartender',
+                  avatar: 'bg-pink-600',
+                  content: '调制了一杯新的“数据流”，口感像跳跳糖。有人想尝试吗？',
+                  images: ['bg-pink-400', 'bg-purple-900', 'bg-blue-900'],
+                  time: '3小时前',
+                  likes: ['ski小助手'],
+                  comments: []
+               },
+               {
+                  id: 3,
+                  name: 'System',
+                  avatar: 'bg-gray-700',
+                  content: '系统更新日志 v1.3：\n- 新增朋友圈功能\n- 优化了聊天体验\n- 修复了一些已知的 bug',
+                  images: [],
+                  time: '昨天',
+                  likes: [],
+                  comments: []
+               }
+             ].map(post => (
+                 <div key={post.id} className={`flex gap-3 py-6 border-b ${isDark ? 'border-white/5' : 'border-slate-200/60'}`}>
+                     <div className={`w-10 h-10 rounded-lg shrink-0 ${post.avatar} flex items-center justify-center text-white font-bold shadow-sm`}>
+                        {post.name[0]}
+                     </div>
+                     <div className="flex-1">
+                        <h4 className={`${wcBlueText} font-bold text-base leading-tight mb-1`}>{post.name}</h4>
+                        <p className={`text-[15px] leading-relaxed mb-2 ${textPrimary} whitespace-pre-line`}>{post.content}</p>
+                        
+                        {/* Images Grid */}
+                        {post.images.length > 0 && (
+                           <div className={`grid gap-1 mb-2 ${post.images.length === 1 ? 'grid-cols-2' : 'grid-cols-3'} w-full max-w-[80%]`}>
+                              {post.images.map((imgClass, idx) => (
+                                 <div key={idx} className={`aspect-square ${imgClass} ${post.images.length === 1 ? 'h-32 w-full' : ''}`}></div>
+                              ))}
+                           </div>
+                        )}
+                        
+                        {/* Footer */}
+                        <div className="flex justify-between items-center mt-2">
+                            <span className={`text-xs ${textSecondary}`}>{post.time}</span>
+                            <button className={`px-2 py-1 rounded text-xs font-bold tracking-widest ${isDark ? 'bg-white/5 text-[#576b95]' : 'bg-slate-100 text-[#576b95]'}`}>
+                               ••
+                            </button>
+                        </div>
+                        
+                        {/* Likes/Comments Area */}
+                        {(post.likes.length > 0 || post.comments.length > 0) && (
+                            <div className={`mt-3 rounded p-3 text-[13px] relative ${isDark ? 'bg-white/5' : 'bg-[#F7F7F7]'}`}>
+                                {/* Triangle pointer */}
+                                <div className={`absolute top-[-6px] left-4 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[6px] ${isDark ? 'border-b-white/5' : 'border-b-[#F7F7F7]'}`}></div>
+                                
+                                {post.likes.length > 0 && (
+                                   <div className={`${wcBlueText} font-medium mb-1 flex items-center gap-1 leading-5 ${post.comments.length > 0 ? `border-b pb-1 ${isDark ? 'border-white/5' : 'border-gray-200/50'}` : ''}`}>
+                                      <IconHeart className="w-3 h-3 stroke-current" /> 
+                                      {post.likes.join(', ')}
+                                   </div>
+                                )}
+                                
+                                {post.comments.map((comment, cIdx) => (
+                                   <div key={cIdx} className={`leading-5 mt-0.5 ${textPrimary}`}>
+                                      <span className={`${wcBlueText} font-medium`}>{comment.user}:</span> {comment.text}
+                                   </div>
+                                ))}
+                            </div>
+                        )}
+                     </div>
+                 </div>
+             ))}
+          </div>
+      </div>
+  );
+
   const renderChatList = () => (
     <div className="flex-1 overflow-y-auto no-scrollbar">
       {conversations.length === 0 ? (
@@ -1074,6 +1218,13 @@ const ChatApp: React.FC<ChatAppProps> = ({
       >
         <IconUsers className="w-6 h-6" />
         <span className="text-[10px]">通讯录</span>
+      </button>
+      <button 
+        onClick={() => navigate('/chat/moments')}
+        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'moments' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
+      >
+        <IconMoments className="w-6 h-6" />
+        <span className="text-[10px]">动态</span>
       </button>
       <button 
         onClick={() => navigate('/chat/me')}
@@ -1200,21 +1351,25 @@ const ChatApp: React.FC<ChatAppProps> = ({
 
   return (
     <div className={`h-full flex flex-col relative ${bgMain} ${textPrimary}`}>
-      <div className={`h-24 pt-8 px-4 flex items-center justify-between shrink-0 z-10 border-b ${bgHeader}`}>
-        <span className="font-bold text-lg ml-2">
-          {activeTab === 'chats' && '聊天'}
-          {activeTab === 'contacts' && '通讯录'}
-          {activeTab === 'me' && '我'}
-        </span>
-        <div className="flex gap-2">
-           <button onClick={closeApp} className={`p-2 rounded-full ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}>
-             <IconX className="w-4 h-4" />
-           </button>
+      {/* Hide standard header for Moments to allow full cover image */}
+      {activeTab !== 'moments' && (
+        <div className={`h-24 pt-8 px-4 flex items-center justify-between shrink-0 z-10 border-b ${bgHeader}`}>
+          <span className="font-bold text-lg ml-2">
+            {activeTab === 'chats' && '聊天'}
+            {activeTab === 'contacts' && '通讯录'}
+            {activeTab === 'me' && '我'}
+          </span>
+          <div className="flex gap-2">
+             <button onClick={closeApp} className={`p-2 rounded-full ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}>
+               <IconX className="w-4 h-4" />
+             </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {activeTab === 'chats' && renderChatList()}
       {activeTab === 'contacts' && renderContactsList()}
+      {activeTab === 'moments' && renderMoments()}
       {activeTab === 'me' && renderMe()}
       {renderTabBar()}
     </div>
