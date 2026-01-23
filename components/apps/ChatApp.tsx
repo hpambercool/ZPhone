@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatMessage, AppConfig, WorldEntry, Contact, Conversation, ThemeMode, UserPersona } from '../../types';
-import { IconChat, IconUsers, IconUser, IconPlus, IconChevronLeft, IconX, IconCheck } from '../Icons';
+import { IconChat, IconUsers, IconUser, IconPlus, IconChevronLeft, IconX, IconCheck, IconSettings } from '../Icons';
 import { getGeminiResponseStream } from '../../services/geminiService';
 import { GenerateContentResponse } from '@google/genai';
 
@@ -37,6 +37,14 @@ const IconMoreHorizontal = ({ className }: { className?: string }) => (
     <circle cx="12" cy="12" r="1" />
     <circle cx="19" cy="12" r="1" />
     <circle cx="5" cy="12" r="1" />
+  </svg>
+);
+
+const IconWallet = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+    <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+    <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
   </svg>
 );
 
@@ -570,8 +578,30 @@ const ChatApp: React.FC<ChatAppProps> = ({
         </div>
         
         <div className="space-y-3">
+          {/* Wallet */}
           <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
-            <span className={textPrimary}>设置</span>
+            <div className="flex items-center gap-3">
+                <IconWallet className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
+                <span className={textPrimary}>钱包</span>
+            </div>
+            <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
+          </div>
+
+          {/* Stickers */}
+          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
+             <div className="flex items-center gap-3">
+                <IconFace className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
+                <span className={textPrimary}>表情</span>
+             </div>
+             <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
+          </div>
+
+          {/* Settings */}
+          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
+             <div className="flex items-center gap-3">
+                <IconSettings className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
+                <span className={textPrimary}>设置</span>
+             </div>
             <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
           </div>
         </div>
