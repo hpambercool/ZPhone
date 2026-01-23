@@ -1,11 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatMessage, AppConfig, WorldEntry, Contact, Conversation, ThemeMode, UserPersona } from '../../types';
 import { IconChat, IconUsers, IconUser, IconPlus, IconChevronLeft, IconX, IconCheck, IconSettings } from '../Icons';
 import { getGeminiResponseStream } from '../../services/geminiService';
 import { GenerateContentResponse } from '@google/genai';
 
-// --- Local Icons for WeChat UI ---
+// --- Local Icons ---
 const IconMic = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -48,6 +48,69 @@ const IconWallet = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const IconMoney = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+  </svg>
+);
+
+const IconCard = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <line x1="2" y1="10" x2="22" y2="10" />
+  </svg>
+);
+
+const IconBill = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
+    <polyline points="10 9 9 9 8 9" />
+  </svg>
+);
+
+// --- Wallet Types ---
+interface Transaction {
+  id: string;
+  type: 'income' | 'expense';
+  amount: number;
+  date: number;
+  title: string;
+}
+
+interface BankCard {
+  id: string;
+  bankName: string;
+  cardType: '储蓄卡' | '信用卡';
+  last4: string;
+  color: string;
+}
+
+interface RelativeCard {
+  id: string;
+  contactId: string;
+  limit: number;
+  spent: number;
+}
+
+interface WalletState {
+  balance: number;
+  cards: BankCard[];
+  relativeCards: RelativeCard[];
+  transactions: Transaction[];
+  isRelativeActive: boolean;
+}
+
+const DEFAULT_WALLET: WalletState = {
+  balance: 0.00,
+  cards: [],
+  relativeCards: [],
+  transactions: [],
+  isRelativeActive: false
+};
+
 interface ChatAppProps {
   config: AppConfig;
   setConfig: React.Dispatch<React.SetStateAction<AppConfig>>;
@@ -77,6 +140,7 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const bgHeader = isDark ? 'bg-white/5 backdrop-blur-md border-white/5' : 'bg-white/80 backdrop-blur-md border-slate-200 shadow-sm';
   const bgItem = isDark ? 'hover:bg-white/5' : 'hover:bg-slate-200/50';
   const bgPanel = isDark ? 'glass-panel' : 'bg-white shadow-sm border border-slate-200';
+  const bgInput = isDark ? 'bg-black/40 text-white border-white/10' : 'bg-white text-black border-slate-200';
   
   // WeChat UI Colors
   const wcBg = isDark ? 'bg-[#111111]' : 'bg-[#EDEDED]';
@@ -86,19 +150,30 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const wcBubbleOther = isDark ? 'bg-[#2C2C2C] text-white' : 'bg-white text-black';
   
   // --- Routing Logic ---
-  const isChatRoom = location.pathname.startsWith('/chat/room/');
-  // Use contactId from URL
-  const activeContactId = isChatRoom ? location.pathname.split('/').pop() || null : null;
+  const pathname = location.pathname;
+  const isChatRoom = pathname.startsWith('/chat/room/');
+  const isWallet = pathname.startsWith('/chat/me/wallet');
+  const isPersonas = pathname.startsWith('/chat/me/personas');
+  const activeContactId = isChatRoom ? pathname.split('/').pop() || null : null;
+
+  const activeTab = useMemo(() => {
+    if (pathname.startsWith('/chat/contacts')) return 'contacts';
+    if (pathname.startsWith('/chat/me')) return 'me';
+    return 'chats';
+  }, [pathname]);
 
   // --- Local Persistent State ---
-  const [activeTab, setActiveTab] = useState<'chats' | 'contacts' | 'me'>('chats');
-  
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const saved = localStorage.getItem('os26_conversations');
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Chat Room Inputs
+  const [wallet, setWallet] = useState<WalletState>(() => {
+    const saved = localStorage.getItem('os26_wallet');
+    return saved ? JSON.parse(saved) : DEFAULT_WALLET;
+  });
+
+  // Chat Inputs
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -109,7 +184,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const [newContactPrompt, setNewContactPrompt] = useState('');
 
   // User Persona State
-  const [showPersonaModal, setShowPersonaModal] = useState(false);
   const [newPersonaName, setNewPersonaName] = useState('');
   const [showCreatePersona, setShowCreatePersona] = useState(false);
 
@@ -119,7 +193,11 @@ const ChatApp: React.FC<ChatAppProps> = ({
     localStorage.setItem('os26_conversations', JSON.stringify(conversations));
   }, [conversations]);
 
-  // Auto-create conversation if missing when visiting a room
+  useEffect(() => {
+    localStorage.setItem('os26_wallet', JSON.stringify(wallet));
+  }, [wallet]);
+
+  // Auto-create conversation
   useEffect(() => {
     if (activeContactId && contacts.find(c => c.id === activeContactId)) {
         const exists = conversations.some(c => c.contactId === activeContactId);
@@ -137,7 +215,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
     }
   }, [activeContactId, conversations, contacts]);
 
-  // Scroll to bottom
   useEffect(() => {
     if (activeContactId) {
       setTimeout(() => {
@@ -224,12 +301,8 @@ const ChatApp: React.FC<ChatAppProps> = ({
 
   const handleSend = async () => {
     if (!input.trim() || loading || !activeContactId) return;
-
     let currentConv = conversations.find(c => c.contactId === activeContactId);
-    
-    // Safety check: if conversation doesn't exist yet (very rare if effect works), we might skip or handle
     if (!currentConv) return;
-    
     const contact = contacts.find(c => c.id === currentConv.contactId);
     if (!contact) return;
 
@@ -313,7 +386,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
           }));
         }
       }
-
     } catch (error) {
       setConversations(prev => prev.map(c => {
         if (c.contactId === activeContactId) {
@@ -337,32 +409,554 @@ const ChatApp: React.FC<ChatAppProps> = ({
     }
   };
 
-  // --- Renders ---
+  // --- Render Wallet Components ---
 
-  const renderTabBar = () => (
-    <div className={`h-16 border-t shrink-0 flex justify-around items-center px-2 pb-2 ${isDark ? 'glass-panel border-white/10' : 'bg-white/80 backdrop-blur-md border-slate-200'}`}>
-      <button 
-        onClick={() => setActiveTab('chats')}
-        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'chats' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
-      >
-        <IconChat className="w-6 h-6" />
-        <span className="text-[10px]">聊天</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('contacts')}
-        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'contacts' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
-      >
-        <IconUsers className="w-6 h-6" />
-        <span className="text-[10px]">通讯录</span>
-      </button>
-      <button 
-        onClick={() => setActiveTab('me')}
-        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'me' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
-      >
-        <IconUser className="w-6 h-6" />
-        <span className="text-[10px]">我</span>
-      </button>
+  const renderWalletBalance = () => {
+    const isRecharge = pathname.includes('/recharge');
+    const isWithdraw = pathname.includes('/withdraw');
+    const [amount, setAmount] = useState('');
+    const [selectedCardId, setSelectedCardId] = useState(wallet.cards[0]?.id || '');
+    const hasCards = wallet.cards.length > 0;
+
+    const handleTransaction = () => {
+      const val = parseFloat(amount);
+      if (isNaN(val) || val <= 0) return;
+      if (isWithdraw && val > wallet.balance) return alert('余额不足');
+      if (!selectedCardId) return alert('请选择银行卡');
+
+      const card = wallet.cards.find(c => c.id === selectedCardId);
+      const newTransaction: Transaction = {
+        id: Date.now().toString(),
+        type: isRecharge ? 'income' : 'expense',
+        amount: val,
+        date: Date.now(),
+        title: isRecharge ? `充值 - ${card?.bankName}` : `提现 - ${card?.bankName}`
+      };
+
+      setWallet(prev => ({
+        ...prev,
+        balance: isRecharge ? prev.balance + val : prev.balance - val,
+        transactions: [newTransaction, ...prev.transactions]
+      }));
+      navigate('/chat/me/wallet');
+    };
+
+    return (
+      <div className={`flex-1 h-full flex flex-col ${bgMain} p-4`}>
+        <div className="flex items-center gap-2 mb-6 pt-4">
+          <button onClick={() => navigate('/chat/me/wallet')} className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
+            <IconChevronLeft className={`w-5 h-5 ${textPrimary}`} />
+          </button>
+          <h2 className={`text-xl font-bold ${textPrimary}`}>{isRecharge ? '充值' : '提现'}</h2>
+        </div>
+
+        {hasCards ? (
+          <div className={`${bgPanel} p-6 rounded-2xl space-y-4`}>
+             <div>
+                <label className={`text-xs ${textSecondary}`}>金额</label>
+                <div className={`flex items-baseline mt-2 border-b ${isDark ? 'border-white/20' : 'border-slate-200'} pb-2`}>
+                   <span className={`text-2xl font-bold mr-2 ${textPrimary}`}>¥</span>
+                   <input 
+                      type="number"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value)}
+                      className={`w-full bg-transparent text-4xl font-bold outline-none ${textPrimary}`}
+                      placeholder="0.00"
+                   />
+                </div>
+                {isWithdraw && <div className={`text-xs mt-2 ${textSecondary}`}>当前余额: ¥ {wallet.balance.toFixed(2)}</div>}
+             </div>
+
+             <div>
+                <label className={`text-xs ${textSecondary}`}>选择银行卡</label>
+                <select 
+                   value={selectedCardId}
+                   onChange={e => setSelectedCardId(e.target.value)}
+                   className={`w-full mt-2 p-3 rounded-xl border outline-none ${bgInput}`}
+                >
+                   {wallet.cards.map(c => (
+                     <option key={c.id} value={c.id}>{c.bankName} ({c.cardType}) - {c.last4}</option>
+                   ))}
+                </select>
+             </div>
+
+             <button 
+               onClick={handleTransaction}
+               disabled={!amount || parseFloat(amount) <= 0}
+               className={`w-full py-3 rounded-xl font-bold mt-4 ${isRecharge ? 'bg-green-500 text-white' : 'bg-white text-black'}`}
+             >
+                确认{isRecharge ? '充值' : '提现'}
+             </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-64 text-center">
+             <p className={`${textSecondary} mb-4`}>请先绑定银行卡</p>
+             <button onClick={() => navigate('/chat/me/wallet/cards')} className="text-blue-500">去绑定</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderWalletCards = () => {
+    const [isAdding, setIsAdding] = useState(false);
+    const [bankName, setBankName] = useState('招商银行');
+    const [cardType, setCardType] = useState<'储蓄卡' | '信用卡'>('储蓄卡');
+    const [number, setNumber] = useState('');
+
+    const addCard = () => {
+       if (number.length < 4) return;
+       const newCard: BankCard = {
+         id: Date.now().toString(),
+         bankName,
+         cardType,
+         last4: number.slice(-4),
+         color: ['bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-indigo-500'][Math.floor(Math.random()*4)]
+       };
+       setWallet(prev => ({ ...prev, cards: [...prev.cards, newCard] }));
+       setIsAdding(false);
+       setNumber('');
+    };
+
+    return (
+      <div className={`flex-1 h-full flex flex-col ${bgMain} p-4`}>
+         <div className="flex items-center justify-between mb-6 pt-4">
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/chat/me/wallet')} className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
+              <IconChevronLeft className={`w-5 h-5 ${textPrimary}`} />
+            </button>
+            <h2 className={`text-xl font-bold ${textPrimary}`}>银行卡</h2>
+          </div>
+          <button onClick={() => setIsAdding(true)} className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
+             <IconPlus className={`w-5 h-5 ${textPrimary}`} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+           {wallet.cards.map(card => (
+             <div key={card.id} className={`p-5 rounded-2xl text-white relative overflow-hidden ${card.color} shadow-lg`}>
+                <div className="flex justify-between items-start">
+                   <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold">
+                         {card.bankName[0]}
+                      </div>
+                      <div>
+                         <div className="font-bold">{card.bankName}</div>
+                         <div className="text-xs opacity-80">{card.cardType}</div>
+                      </div>
+                   </div>
+                </div>
+                <div className="mt-6 text-xl font-mono tracking-widest">
+                   **** **** **** {card.last4}
+                </div>
+             </div>
+           ))}
+           {wallet.cards.length === 0 && !isAdding && (
+              <div className={`text-center py-10 ${textSecondary}`}>暂无银行卡</div>
+           )}
+        </div>
+
+        {isAdding && (
+           <div className={`absolute inset-0 z-50 p-6 flex items-center justify-center ${isDark ? 'bg-black/80' : 'bg-white/80'} backdrop-blur-md`}>
+              <div className={`${bgPanel} w-full max-w-sm p-6 rounded-2xl space-y-4`}>
+                 <h3 className={`text-lg font-bold ${textPrimary}`}>添加银行卡</h3>
+                 <select value={bankName} onChange={e => setBankName(e.target.value)} className={`w-full p-3 rounded-lg border ${bgInput}`}>
+                    {['招商银行', '建设银行', '工商银行', '中国银行', '农业银行'].map(b => <option key={b} value={b}>{b}</option>)}
+                 </select>
+                 <select value={cardType} onChange={e => setCardType(e.target.value as any)} className={`w-full p-3 rounded-lg border ${bgInput}`}>
+                    <option value="储蓄卡">储蓄卡</option>
+                    <option value="信用卡">信用卡</option>
+                 </select>
+                 <input 
+                   placeholder="卡号" 
+                   value={number}
+                   onChange={e => setNumber(e.target.value)}
+                   className={`w-full p-3 rounded-lg border ${bgInput}`}
+                 />
+                 <div className="flex gap-2">
+                    <button onClick={() => setIsAdding(false)} className={`flex-1 py-3 rounded-lg ${isDark ? 'bg-white/10 text-white' : 'bg-slate-200 text-black'}`}>取消</button>
+                    <button onClick={addCard} className="flex-1 py-3 rounded-lg bg-blue-600 text-white">添加</button>
+                 </div>
+              </div>
+           </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderWalletRelative = () => {
+    const [pressTimer, setPressTimer] = useState<any>(null);
+    const [progress, setProgress] = useState(0);
+    const [showContactSelect, setShowContactSelect] = useState(false);
+
+    const handlePressStart = () => {
+       if (wallet.isRelativeActive) return;
+       setProgress(0);
+       const start = Date.now();
+       const timer = setInterval(() => {
+          const p = Math.min(((Date.now() - start) / 2000) * 100, 100);
+          setProgress(p);
+          if (p >= 100) {
+             clearInterval(timer);
+             setWallet(prev => ({ ...prev, isRelativeActive: true }));
+          }
+       }, 16);
+       setPressTimer(timer);
+    };
+
+    const handlePressEnd = () => {
+       if (pressTimer) clearInterval(pressTimer);
+       setPressTimer(null);
+       if (!wallet.isRelativeActive) setProgress(0);
+    };
+
+    const giftCard = (contactId: string) => {
+       if (wallet.relativeCards.length >= 10) return alert('最多赠送10张');
+       const newCard: RelativeCard = {
+          id: Date.now().toString(),
+          contactId,
+          limit: 1000,
+          spent: 0
+       };
+       setWallet(prev => ({ ...prev, relativeCards: [...prev.relativeCards, newCard] }));
+       setShowContactSelect(false);
+    };
+
+    return (
+      <div className={`flex-1 h-full flex flex-col ${bgMain} p-4`}>
+         <div className="flex items-center gap-2 mb-6 pt-4">
+          <button onClick={() => navigate('/chat/me/wallet')} className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
+            <IconChevronLeft className={`w-5 h-5 ${textPrimary}`} />
+          </button>
+          <h2 className={`text-xl font-bold ${textPrimary}`}>亲属卡</h2>
+        </div>
+
+        {!wallet.isRelativeActive ? (
+           <div className="flex-1 flex flex-col items-center justify-center pb-20 select-none">
+              <div 
+                onMouseDown={handlePressStart}
+                onMouseUp={handlePressEnd}
+                onTouchStart={handlePressStart}
+                onTouchEnd={handlePressEnd}
+                className={`w-32 h-32 rounded-full flex items-center justify-center relative cursor-pointer active:scale-95 transition-transform ${isDark ? 'bg-white/10' : 'bg-white shadow-lg'}`}
+              >
+                 <svg className="absolute inset-0 w-full h-full -rotate-90">
+                    <circle cx="64" cy="64" r="60" stroke="currentColor" strokeWidth="4" fill="none" className="text-gray-200/10" />
+                    <circle cx="64" cy="64" r="60" stroke="#f97316" strokeWidth="4" fill="none" strokeDasharray="377" strokeDashoffset={377 - (377 * progress) / 100} />
+                 </svg>
+                 <span className={`font-bold ${textPrimary}`}>长按激活</span>
+              </div>
+              <p className={`mt-8 text-sm max-w-xs text-center ${textSecondary}`}>
+                 激活后可赠送亲属卡给联系人，对方消费由你买单。
+              </p>
+           </div>
+        ) : (
+           <div className="space-y-4">
+              <button 
+                onClick={() => setShowContactSelect(true)}
+                className={`w-full p-4 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 ${isDark ? 'border-white/20 text-white/60' : 'border-slate-300 text-slate-500'}`}
+              >
+                 <IconPlus className="w-5 h-5" /> 赠送亲属卡 ({wallet.relativeCards.length}/10)
+              </button>
+
+              {wallet.relativeCards.map(card => {
+                 const contact = contacts.find(c => c.id === card.contactId);
+                 return (
+                    <div key={card.id} className={`p-4 rounded-xl flex items-center gap-4 ${isDark ? 'bg-orange-500/20 border-orange-500/30 border' : 'bg-orange-50 border-orange-200 border'}`}>
+                       <div className={`w-12 h-12 rounded-full ${contact?.avatar || 'bg-gray-500'} flex items-center justify-center text-white font-bold`}>
+                          {contact?.name[0]}
+                       </div>
+                       <div className="flex-1">
+                          <h3 className={`font-bold ${textPrimary}`}>赠送给: {contact?.name}</h3>
+                          <div className={`text-xs ${textSecondary}`}>月限额: ¥ {card.limit}</div>
+                       </div>
+                    </div>
+                 );
+              })}
+           </div>
+        )}
+
+        {showContactSelect && (
+           <div className={`absolute inset-0 z-50 p-6 flex flex-col ${bgMain}`}>
+              <div className="flex items-center gap-2 mb-4">
+                 <button onClick={() => setShowContactSelect(false)}><IconX className={`w-6 h-6 ${textPrimary}`} /></button>
+                 <h3 className={`text-lg font-bold ${textPrimary}`}>选择联系人</h3>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-2">
+                 {contacts.map(c => (
+                    <div key={c.id} onClick={() => giftCard(c.id)} className={`p-3 rounded-xl flex items-center gap-3 cursor-pointer ${bgItem}`}>
+                       <div className={`w-10 h-10 rounded-full ${c.avatar} flex items-center justify-center text-white`}>{c.name[0]}</div>
+                       <span className={textPrimary}>{c.name}</span>
+                    </div>
+                 ))}
+              </div>
+           </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderWalletBills = () => {
+    const [year, setYear] = useState(new Date().getFullYear());
+    const [month, setMonth] = useState(new Date().getMonth() + 1);
+
+    const filtered = wallet.transactions.filter(t => {
+       const d = new Date(t.date);
+       return d.getFullYear() === year && (d.getMonth() + 1) === month;
+    });
+
+    const income = filtered.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+    const expense = filtered.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+
+    return (
+      <div className={`flex-1 h-full flex flex-col ${bgMain} p-4`}>
+         <div className="flex items-center gap-2 mb-6 pt-4">
+          <button onClick={() => navigate('/chat/me/wallet')} className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}>
+            <IconChevronLeft className={`w-5 h-5 ${textPrimary}`} />
+          </button>
+          <h2 className={`text-xl font-bold ${textPrimary}`}>账单</h2>
+        </div>
+
+        <div className={`flex justify-between items-center mb-4 ${textSecondary} text-sm`}>
+           <div className="flex gap-2">
+              <select value={year} onChange={e => setYear(parseInt(e.target.value))} className={`bg-transparent outline-none ${textPrimary}`}>
+                 {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
+              </select>
+              <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className={`bg-transparent outline-none ${textPrimary}`}>
+                 {Array.from({length:12},(_,i)=>i+1).map(m => <option key={m} value={m}>{m}月</option>)}
+              </select>
+           </div>
+           <div className="text-xs">
+              收 ¥{income.toFixed(2)} / 支 ¥{expense.toFixed(2)}
+           </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
+           {filtered.length > 0 ? filtered.sort((a,b) => b.date - a.date).map(t => (
+              <div key={t.id} className={`p-4 rounded-xl flex justify-between items-center ${bgPanel}`}>
+                 <div>
+                    <div className={`font-bold ${textPrimary}`}>{t.title}</div>
+                    <div className={`text-xs ${textSecondary}`}>{new Date(t.date).toLocaleString()}</div>
+                 </div>
+                 <div className={`font-bold ${t.type === 'income' ? 'text-green-500' : 'text-black dark:text-white'}`}>
+                    {t.type === 'income' ? '+' : '-'}{t.amount.toFixed(2)}
+                 </div>
+              </div>
+           )) : (
+              <div className={`text-center py-10 ${textSecondary}`}>本月无交易记录</div>
+           )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderWalletRoot = () => (
+    <div className={`flex-1 h-full flex flex-col ${bgMain}`}>
+       <div className={`h-24 pt-8 px-4 flex items-center gap-2 shrink-0 z-10 ${bgHeader}`}>
+         <button 
+           onClick={() => navigate('/chat/me')}
+           className={`p-2 rounded-full ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}
+         >
+           <IconChevronLeft className={`w-5 h-5 ${textPrimary}`} />
+         </button>
+         <h2 className={`text-xl font-bold ${textPrimary}`}>钱包</h2>
+       </div>
+
+       <div className="flex-1 overflow-y-auto no-scrollbar p-4">
+            {/* Balance Card */}
+            <div className={`p-6 rounded-3xl mb-4 relative overflow-hidden ${isDark ? 'bg-green-600' : 'bg-green-500'} text-white shadow-lg`}>
+                <div className="absolute top-0 right-0 p-8 opacity-10">
+                    <IconMoney className="w-32 h-32" />
+                </div>
+                <div className="relative z-10">
+                    <div className="flex items-center gap-2 mb-2 opacity-90">
+                        <IconMoney className="w-5 h-5" />
+                        <span className="text-sm font-medium">零钱</span>
+                    </div>
+                    <div className="text-4xl font-bold mb-4">¥ {wallet.balance.toFixed(2)}</div>
+                    <div className="flex gap-3">
+                       <button onClick={() => navigate('/chat/me/wallet/recharge')} className="flex-1 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-bold backdrop-blur-sm transition-colors">充值</button>
+                       <button onClick={() => navigate('/chat/me/wallet/withdraw')} className="flex-1 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-bold backdrop-blur-sm transition-colors">提现</button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Grid for other items */}
+            <div className="grid grid-cols-3 gap-3">
+                {[
+                    { label: '银行卡', icon: <IconCard className="w-6 h-6" />, color: 'bg-blue-500', path: '/cards' },
+                    { label: '亲属卡', icon: <IconUsers className="w-6 h-6" />, color: 'bg-orange-500', path: '/relative' },
+                    { label: '账单', icon: <IconBill className="w-6 h-6" />, color: 'bg-purple-500', path: '/bills' },
+                ].map((item) => (
+                    <div 
+                      key={item.label} 
+                      onClick={() => navigate('/chat/me/wallet' + item.path)}
+                      className={`aspect-square rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white shadow-sm border border-slate-100 hover:bg-slate-50'}`}
+                    >
+                        <div className={`w-10 h-10 rounded-full ${item.color} flex items-center justify-center text-white`}>
+                            {item.icon}
+                        </div>
+                        <span className={`text-sm font-medium ${textPrimary}`}>{item.label}</span>
+                    </div>
+                ))}
+            </div>
+       </div>
     </div>
+  );
+
+  const renderWallet = () => {
+     if (pathname.includes('/recharge') || pathname.includes('/withdraw')) return renderWalletBalance();
+     if (pathname.includes('/cards')) return renderWalletCards();
+     if (pathname.includes('/relative')) return renderWalletRelative();
+     if (pathname.includes('/bills')) return renderWalletBills();
+     return renderWalletRoot();
+  };
+
+  const renderMe = () => {
+    const activePersona = config.userPersonas?.find(p => p.id === config.currentPersonaId);
+    const activeAvatar = activePersona?.avatar || 'bg-gradient-to-br from-indigo-500 to-purple-600';
+
+    return (
+      <div className="flex-1 overflow-y-auto no-scrollbar p-4">
+        <div className="flex items-center gap-4 mb-8 pt-4">
+          <div 
+            onClick={() => navigate('/chat/me/personas')}
+            className={`w-16 h-16 rounded-xl flex items-center justify-center border cursor-pointer hover:scale-105 active:scale-95 transition-transform ${isDark ? 'bg-white/10 border-white/20' : 'bg-white border-slate-200 shadow-sm'} ${activeAvatar}`}
+          >
+             <span className="text-2xl font-bold text-white drop-shadow-md">{config.userName[0]}</span>
+          </div>
+          <div onClick={() => navigate('/chat/me/personas')} className="cursor-pointer">
+             <div className="flex items-center gap-2">
+                 <h2 className={`text-xl font-bold ${textPrimary}`}>{config.userName}</h2>
+                 <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
+             </div>
+             <p className={`text-xs ${textSecondary}`}>OS 26 ID: {config.currentPersonaId?.slice(-6) || 'user_001'}</p>
+          </div>
+        </div>
+        
+        <div className="space-y-3">
+          {/* Wallet */}
+          <div 
+            onClick={() => navigate('/chat/me/wallet')}
+            className={`p-4 rounded-xl flex justify-between items-center cursor-pointer transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white shadow-sm hover:bg-slate-50'}`}
+          >
+            <div className="flex items-center gap-3">
+                <IconWallet className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
+                <span className={textPrimary}>钱包</span>
+            </div>
+            <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
+          </div>
+
+          {/* Stickers */}
+          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
+             <div className="flex items-center gap-3">
+                <IconFace className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
+                <span className={textPrimary}>表情</span>
+             </div>
+             <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
+          </div>
+
+          {/* Settings */}
+          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
+             <div className="flex items-center gap-3">
+                <IconSettings className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
+                <span className={textPrimary}>设置</span>
+             </div>
+            <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPersonaSelector = () => (
+      <div className={`flex-1 h-full flex flex-col ${bgMain}`}>
+          <div className={`h-24 pt-8 px-4 flex items-center gap-2 shrink-0 z-10 ${bgHeader}`}>
+              <button 
+                onClick={() => navigate('/chat/me')}
+                className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}
+              >
+                  <IconChevronLeft className={`w-6 h-6 ${textPrimary}`} />
+              </button>
+              <h2 className={`text-xl font-bold ${textPrimary}`}>切换身份</h2>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 pb-20 no-scrollbar pt-4">
+              <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => setShowCreatePersona(true)}
+                    className={`aspect-square rounded-3xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all ${isDark ? 'border-white/20 hover:border-white/40 hover:bg-white/5' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'}`}
+                  >
+                      <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center">
+                          <IconPlus className="w-6 h-6 text-white" />
+                      </div>
+                      <span className={`text-sm font-medium ${textPrimary}`}>新建人设</span>
+                  </button>
+
+                  {config.userPersonas?.map(persona => {
+                      const isActive = config.currentPersonaId === persona.id;
+                      return (
+                          <div 
+                              key={persona.id}
+                              onClick={() => handleSwitchPersona(persona)}
+                              className={`aspect-square rounded-3xl relative overflow-hidden p-4 flex flex-col justify-between transition-all cursor-pointer border ${isActive ? 'border-green-500 bg-green-500/10' : (isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-slate-200 bg-white shadow-sm hover:shadow-md')}`}
+                          >
+                              {isActive && (
+                                  <div className="absolute top-3 right-3 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                      <IconCheck className="w-3 h-3 text-white" />
+                                  </div>
+                              )}
+                              
+                              <div className={`w-14 h-14 rounded-2xl ${persona.avatar} shadow-lg`} />
+                              
+                              <div>
+                                  <h3 className={`font-bold truncate ${textPrimary}`}>{persona.name}</h3>
+                                  <p className={`text-xs ${textTertiary}`}>User ID: {persona.id.slice(-4)}</p>
+                              </div>
+                              {config.userPersonas && config.userPersonas.length > 1 && !isActive && (
+                                  <button 
+                                    onClick={(e) => handleDeletePersona(e, persona.id)}
+                                    className="absolute bottom-4 right-4 p-2 rounded-full hover:bg-red-500/20 text-transparent hover:text-red-500 transition-all"
+                                  >
+                                      <IconX className="w-4 h-4" />
+                                  </button>
+                              )}
+                          </div>
+                      );
+                  })}
+              </div>
+          </div>
+
+          {showCreatePersona && (
+              <div className={`absolute inset-0 z-[60] flex items-end sm:items-center justify-center p-4 ${isDark ? 'bg-black/60' : 'bg-slate-900/20'} backdrop-blur-sm`}>
+                  <div className={`w-full max-w-sm p-6 rounded-3xl animate-pop-in shadow-2xl ${bgPanel}`}>
+                      <h3 className={`text-lg font-bold mb-4 ${textPrimary}`}>创建新人设</h3>
+                      <input 
+                        value={newPersonaName}
+                        onChange={(e) => setNewPersonaName(e.target.value)}
+                        placeholder="输入名称..."
+                        className={`w-full p-4 rounded-xl mb-4 border outline-none ${isDark ? 'bg-black/40 text-white border-white/10 focus:border-green-500' : 'bg-slate-50 text-slate-900 border-slate-200 focus:border-green-500'}`}
+                        autoFocus
+                      />
+                      <div className="flex gap-3">
+                          <button 
+                            onClick={() => setShowCreatePersona(false)}
+                            className={`flex-1 py-3 rounded-xl font-bold ${isDark ? 'bg-white/10 text-white' : 'bg-slate-200 text-slate-700'}`}
+                          >
+                              取消
+                          </button>
+                          <button 
+                            onClick={handleCreatePersona}
+                            disabled={!newPersonaName.trim()}
+                            className="flex-1 py-3 rounded-xl font-bold bg-green-500 text-white disabled:opacity-50"
+                          >
+                              创建
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          )}
+      </div>
   );
 
   const renderChatList = () => (
@@ -465,154 +1059,34 @@ const ChatApp: React.FC<ChatAppProps> = ({
     </div>
   );
 
-  const renderPersonaSelector = () => (
-      <div className={`absolute inset-0 z-50 flex flex-col animate-slide-up ${isDark ? 'bg-black/95' : 'bg-white/95'} backdrop-blur-3xl`}>
-          <div className="flex items-center justify-between p-6">
-              <h2 className={`text-2xl font-bold ${textPrimary}`}>切换身份</h2>
-              <button 
-                onClick={() => setShowPersonaModal(false)}
-                className={`p-2 rounded-full ${isDark ? 'bg-white/10' : 'bg-slate-100'}`}
-              >
-                  <IconX className={`w-6 h-6 ${textPrimary}`} />
-              </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-6 pb-20 no-scrollbar">
-              <div className="grid grid-cols-2 gap-4">
-                  <button 
-                    onClick={() => setShowCreatePersona(true)}
-                    className={`aspect-square rounded-3xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all ${isDark ? 'border-white/20 hover:border-white/40 hover:bg-white/5' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'}`}
-                  >
-                      <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center">
-                          <IconPlus className="w-6 h-6 text-white" />
-                      </div>
-                      <span className={`text-sm font-medium ${textPrimary}`}>新建人设</span>
-                  </button>
-
-                  {config.userPersonas?.map(persona => {
-                      const isActive = config.currentPersonaId === persona.id;
-                      return (
-                          <div 
-                              key={persona.id}
-                              onClick={() => handleSwitchPersona(persona)}
-                              className={`aspect-square rounded-3xl relative overflow-hidden p-4 flex flex-col justify-between transition-all cursor-pointer border ${isActive ? 'border-green-500 bg-green-500/10' : (isDark ? 'border-white/10 bg-white/5 hover:bg-white/10' : 'border-slate-200 bg-white shadow-sm hover:shadow-md')}`}
-                          >
-                              {isActive && (
-                                  <div className="absolute top-3 right-3 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                                      <IconCheck className="w-3 h-3 text-white" />
-                                  </div>
-                              )}
-                              
-                              <div className={`w-14 h-14 rounded-2xl ${persona.avatar} shadow-lg`} />
-                              
-                              <div>
-                                  <h3 className={`font-bold truncate ${textPrimary}`}>{persona.name}</h3>
-                                  <p className={`text-xs ${textTertiary}`}>User ID: {persona.id.slice(-4)}</p>
-                              </div>
-                              {config.userPersonas && config.userPersonas.length > 1 && !isActive && (
-                                  <button 
-                                    onClick={(e) => handleDeletePersona(e, persona.id)}
-                                    className="absolute bottom-4 right-4 p-2 rounded-full hover:bg-red-500/20 text-transparent hover:text-red-500 transition-all"
-                                  >
-                                      <IconX className="w-4 h-4" />
-                                  </button>
-                              )}
-                          </div>
-                      );
-                  })}
-              </div>
-          </div>
-
-          {showCreatePersona && (
-              <div className={`absolute inset-0 z-[60] flex items-end sm:items-center justify-center p-4 ${isDark ? 'bg-black/60' : 'bg-slate-900/20'} backdrop-blur-sm`}>
-                  <div className={`w-full max-w-sm p-6 rounded-3xl animate-pop-in shadow-2xl ${bgPanel}`}>
-                      <h3 className={`text-lg font-bold mb-4 ${textPrimary}`}>创建新人设</h3>
-                      <input 
-                        value={newPersonaName}
-                        onChange={(e) => setNewPersonaName(e.target.value)}
-                        placeholder="输入名称..."
-                        className={`w-full p-4 rounded-xl mb-4 border outline-none ${isDark ? 'bg-black/40 text-white border-white/10 focus:border-green-500' : 'bg-slate-50 text-slate-900 border-slate-200 focus:border-green-500'}`}
-                        autoFocus
-                      />
-                      <div className="flex gap-3">
-                          <button 
-                            onClick={() => setShowCreatePersona(false)}
-                            className={`flex-1 py-3 rounded-xl font-bold ${isDark ? 'bg-white/10 text-white' : 'bg-slate-200 text-slate-700'}`}
-                          >
-                              取消
-                          </button>
-                          <button 
-                            onClick={handleCreatePersona}
-                            disabled={!newPersonaName.trim()}
-                            className="flex-1 py-3 rounded-xl font-bold bg-green-500 text-white disabled:opacity-50"
-                          >
-                              创建
-                          </button>
-                      </div>
-                  </div>
-              </div>
-          )}
-      </div>
+  const renderTabBar = () => (
+    <div className={`h-16 border-t shrink-0 flex justify-around items-center px-2 pb-2 ${isDark ? 'glass-panel border-white/10' : 'bg-white/80 backdrop-blur-md border-slate-200'}`}>
+      <button 
+        onClick={() => navigate('/chat')}
+        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'chats' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
+      >
+        <IconChat className="w-6 h-6" />
+        <span className="text-[10px]">聊天</span>
+      </button>
+      <button 
+        onClick={() => navigate('/chat/contacts')}
+        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'contacts' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
+      >
+        <IconUsers className="w-6 h-6" />
+        <span className="text-[10px]">通讯录</span>
+      </button>
+      <button 
+        onClick={() => navigate('/chat/me')}
+        className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'me' ? 'text-green-500' : (isDark ? 'text-white/40' : 'text-slate-400')}`}
+      >
+        <IconUser className="w-6 h-6" />
+        <span className="text-[10px]">我</span>
+      </button>
+    </div>
   );
-
-  const renderMe = () => {
-    const activePersona = config.userPersonas?.find(p => p.id === config.currentPersonaId);
-    const activeAvatar = activePersona?.avatar || 'bg-gradient-to-br from-indigo-500 to-purple-600';
-
-    return (
-      <div className="flex-1 overflow-y-auto no-scrollbar p-4">
-        <div className="flex items-center gap-4 mb-8 pt-4">
-          <div 
-            onClick={() => setShowPersonaModal(true)}
-            className={`w-16 h-16 rounded-xl flex items-center justify-center border cursor-pointer hover:scale-105 active:scale-95 transition-transform ${isDark ? 'bg-white/10 border-white/20' : 'bg-white border-slate-200 shadow-sm'} ${activeAvatar}`}
-          >
-             <span className="text-2xl font-bold text-white drop-shadow-md">{config.userName[0]}</span>
-          </div>
-          <div onClick={() => setShowPersonaModal(true)} className="cursor-pointer">
-             <div className="flex items-center gap-2">
-                 <h2 className={`text-xl font-bold ${textPrimary}`}>{config.userName}</h2>
-                 <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
-             </div>
-             <p className={`text-xs ${textSecondary}`}>OS 26 ID: {config.currentPersonaId?.slice(-6) || 'user_001'}</p>
-          </div>
-        </div>
-        
-        <div className="space-y-3">
-          {/* Wallet */}
-          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
-            <div className="flex items-center gap-3">
-                <IconWallet className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
-                <span className={textPrimary}>钱包</span>
-            </div>
-            <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
-          </div>
-
-          {/* Stickers */}
-          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
-             <div className="flex items-center gap-3">
-                <IconFace className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
-                <span className={textPrimary}>表情</span>
-             </div>
-             <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
-          </div>
-
-          {/* Settings */}
-          <div className={`p-4 rounded-xl flex justify-between items-center ${isDark ? 'bg-white/5' : 'bg-white shadow-sm'}`}>
-             <div className="flex items-center gap-3">
-                <IconSettings className={`w-5 h-5 ${isDark ? 'text-white' : 'text-slate-900'}`} />
-                <span className={textPrimary}>设置</span>
-             </div>
-            <IconChevronLeft className={`w-4 h-4 rotate-180 ${textSecondary}`} />
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const renderChatRoom = () => {
     const contact = contacts.find(c => c.id === activeContactId);
-    
-    // Fallback if contact not found (route invalid)
     if (!contact) return (
        <div className={`flex flex-col items-center justify-center h-full ${textPrimary}`}>
          <p>联系人不存在</p>
@@ -621,8 +1095,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
     );
     
     let activeConv = conversations.find(c => c.contactId === activeContactId);
-    
-    // Virtual conversation object to prevent rendering blank or error if state hasn't updated yet
     if (!activeConv) {
         activeConv = {
             id: 'temp-' + contact.id,
@@ -636,7 +1108,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
 
     return (
       <div className={`flex flex-col h-full w-full ${wcBg}`}>
-        {/* WeChat Header */}
         <div className={`h-[50px] pt-[env(safe-area-inset-top)] px-4 flex items-center justify-between shrink-0 border-b z-10 ${wcHeaderBg}`}>
           <button onClick={() => navigate('/chat')} className={`p-2 -ml-2 ${textPrimary}`}>
             <IconChevronLeft className="w-6 h-6" />
@@ -647,7 +1118,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
           </button>
         </div>
 
-        {/* Messages */}
         <div className={`flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar`}>
           {activeConv.messages.map((msg) => (
             <div
@@ -666,7 +1136,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
               >
                 {msg.text}
               </div>
-              {/* User Avatar in Chat */}
               {msg.role === 'user' && (
                   <div className={`w-10 h-10 rounded ml-2 shrink-0 ${config.userPersonas?.find(p => p.id === config.currentPersonaId)?.avatar || 'bg-gray-500'} flex items-center justify-center text-sm font-bold text-white shadow-sm hidden sm:flex`}>
                       {config.userName[0]}
@@ -689,7 +1158,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* WeChat Input Area */}
         <div className={`px-2 py-2 shrink-0 border-t ${wcInputBg} pb-[calc(8px+env(safe-area-inset-bottom))]`}>
            <div className="flex items-end gap-2">
              <button className={`p-2 mb-0.5 ${textSecondary}`}>
@@ -726,13 +1194,12 @@ const ChatApp: React.FC<ChatAppProps> = ({
     );
   };
 
-  if (activeContactId) {
-     return renderChatRoom();
-  }
+  if (isChatRoom) return renderChatRoom();
+  if (isWallet) return renderWallet();
+  if (isPersonas) return renderPersonaSelector();
 
   return (
     <div className={`h-full flex flex-col relative ${bgMain} ${textPrimary}`}>
-      {/* Main App Header */}
       <div className={`h-24 pt-8 px-4 flex items-center justify-between shrink-0 z-10 border-b ${bgHeader}`}>
         <span className="font-bold text-lg ml-2">
           {activeTab === 'chats' && '聊天'}
@@ -750,7 +1217,6 @@ const ChatApp: React.FC<ChatAppProps> = ({
       {activeTab === 'contacts' && renderContactsList()}
       {activeTab === 'me' && renderMe()}
       {renderTabBar()}
-      {showPersonaModal && renderPersonaSelector()}
     </div>
   );
 };
