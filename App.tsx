@@ -20,7 +20,7 @@ const DEFAULT_CONFIG: AppConfig = {
   customApiUrl: '',
   customApiKey: '',
   wallpaper: 'https://i.postimg.cc/sxDg8hrz/dmitrii-shirnin-mq-EKg5D6ln-E-unsplash.jpg',
-  showStatusBar: true
+  showStatusBar: false
 };
 
 const INITIAL_CONTACTS: Contact[] = [
