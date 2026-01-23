@@ -164,7 +164,7 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as 'general' | 'appearance' | 'about')}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
                 activeTab === tab.id
                   ? (isDark ? 'bg-white text-black shadow-lg' : 'bg-slate-900 text-white shadow-lg')
@@ -340,6 +340,21 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
                     </div>
                  </div>
                  <p className={`text-[10px] mt-2 ${textSecondary}`}>点击切换: 左为浅色，右为深色。</p>
+              </div>
+
+              {/* Status Bar Toggle */}
+              <div>
+                 <h2 className={`text-xs font-bold uppercase tracking-wider mb-4 ${textSecondary}`}>系统显示</h2>
+                 <div className="flex items-center justify-between">
+                    <span className={`text-sm ${textPrimary}`}>显示顶部状态栏 (灵动岛)</span>
+                    
+                    <div 
+                      onClick={(e) => { e.stopPropagation(); setConfig(prev => ({ ...prev, showStatusBar: prev.showStatusBar === false ? true : false })); }}
+                      className={`w-14 h-8 rounded-full p-1 cursor-pointer transition-colors duration-300 ${config.showStatusBar !== false ? 'bg-green-500' : (isDark ? 'bg-slate-700' : 'bg-gray-200')}`}
+                    >
+                       <div className={`w-6 h-6 rounded-full bg-white shadow-md transform transition-transform duration-300 ${config.showStatusBar !== false ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                    </div>
+                 </div>
               </div>
 
               {/* Wallpaper Picker */}

@@ -63,6 +63,7 @@ export interface AppConfig {
   customApiKey?: string;
   presets: ApiPreset[];
   wallpaper?: string;
+  showStatusBar?: boolean;
 }
 
 export type ThemeMode = 'light' | 'dark';

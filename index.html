@@ -21,6 +21,7 @@
               'pop-in': 'popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
               'slide-up': 'slideUp 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards',
               'fade-in': 'fadeIn 0.2s ease-out forwards',
+              'jiggle': 'jiggle 0.3s infinite ease-in-out',
             },
             keyframes: {
               popIn: {
@@ -34,6 +35,11 @@
               fadeIn: {
                 '0%': { opacity: '0' },
                 '100%': { opacity: '1' },
+              },
+              jiggle: {
+                '0%': { transform: 'rotate(-2deg)' },
+                '50%': { transform: 'rotate(2deg)' },
+                '100%': { transform: 'rotate(-2deg)' },
               }
             }
           },

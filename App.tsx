@@ -19,7 +19,8 @@ const DEFAULT_CONFIG: AppConfig = {
   presets: [],
   customApiUrl: '',
   customApiKey: '',
-  wallpaper: undefined
+  wallpaper: 'https://i.postimg.cc/sxDg8hrz/dmitrii-shirnin-mq-EKg5D6ln-E-unsplash.jpg',
+  showStatusBar: true
 };
 
 const INITIAL_CONTACTS: Contact[] = [
@@ -92,8 +93,12 @@ const App = () => {
     localStorage.setItem('os26_theme', theme);
   }, [theme]);
 
+  const isDark = theme === 'dark';
+
   // iOS 26 Abstract Wallpaper
-  const wallpaperClass = "bg-[radial-gradient(circle_at_50%_120%,#3b0764, #1e1b4b 40%, #020617 80%)]";
+  const wallpaperClass = isDark 
+    ? "bg-[radial-gradient(circle_at_50%_120%,#3b0764, #1e1b4b 40%, #020617 80%)]" 
+    : "bg-white";
   
   const backgroundStyle = config.wallpaper 
     ? { backgroundImage: `url(${config.wallpaper})`, backgroundSize: 'cover', backgroundPosition: 'center' }
@@ -122,13 +127,13 @@ const App = () => {
 
   return (
     <div 
-      className={`w-full h-[100dvh] relative overflow-hidden bg-slate-900 ${!config.wallpaper ? wallpaperClass : ''}`}
+      className={`w-full h-[100dvh] relative overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'} ${!config.wallpaper ? wallpaperClass : ''}`}
       style={backgroundStyle}
     >
-      <StatusBar />
+      {config.showStatusBar !== false && <StatusBar />}
 
       {/* Desktop is always rendered at Z-0/Z-10 */}
-      <Desktop isBlurred={isAppOpen} />
+      <Desktop isBlurred={isAppOpen} theme={theme} />
 
       {/* 
          PERSISTENT APP LAYOUT 
