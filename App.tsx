@@ -127,7 +127,7 @@ const App = () => {
 
   return (
     <div 
-      className={`w-full h-[100dvh] relative overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'} ${!config.wallpaper ? wallpaperClass : ''}`}
+      className={`w-full h-full relative overflow-hidden ${isDark ? 'bg-slate-900' : 'bg-white'} ${!config.wallpaper ? wallpaperClass : ''}`}
       style={backgroundStyle}
     >
       {config.showStatusBar !== false && <StatusBar />}
