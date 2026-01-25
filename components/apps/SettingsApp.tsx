@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppConfig, ThemeMode, ApiPreset } from '../../types';
@@ -270,20 +271,16 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
                 <h2 className={`text-xs font-bold uppercase tracking-wider mb-4 ${textSecondary}`}>模型选择</h2>
                 <div className="relative">
                     <select
-                        value={config.model}
+                        value={availableModels.length > 0 ? config.model : ''}
                         onChange={(e) => setConfig({ ...config, model: e.target.value })}
                         className={`w-full rounded-lg p-3 text-sm focus:outline-none border appearance-none ${bgInput}`}
                     >
-                        <option value={config.model}>{config.model} (当前)</option>
                         {availableModels.length > 0 ? (
                             availableModels.map(m => (
                                 <option key={m} value={m}>{m}</option>
                             ))
                         ) : (
-                            <>
-                                <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
-                                <option value="gemini-3-pro-preview">Gemini 3.0 Pro</option>
-                            </>
+                            <option value="">无</option>
                         )}
                     </select>
                     <div className={`absolute right-3 top-3 pointer-events-none ${isDark ? 'text-white/50' : 'text-slate-400'}`}>▼</div>
