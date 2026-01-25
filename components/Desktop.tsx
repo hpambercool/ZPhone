@@ -130,22 +130,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         // Apply Transform
         const el = itemsRef.current.get(activeDragIndex);
         if (el) {
-            // If dragging, X/Y are updated by touchMove directly. 
-            // However, to keep scale animation smooth, we apply it here.
-            // But touchMove might have set a more recent X/Y. 
-            // To avoid conflict:
-            // 1. If dragging, we read current X/Y (which are set by touchMove) and just apply scale.
-            // 2. If not dragging, we apply the spring X/Y.
-            
-            // Actually, for pure 1:1, touchMove handles the transform. 
-            // We only need this loop for 'Settling' (finger up) OR 'Scaling' (pick up).
-            
-            // If dragging, let touchMove handle the Translation, this loop handles Scale?
-            // CSS Transform takes one string. We can't update separately.
-            // Strategy: touchMove updates state.x/y AND applies transform.
-            // This loop updates state.scale AND applies transform (using latest state.x/y).
-            // Since RAF and touchMove are async, it might be fine.
-            
             el.style.transform = `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`;
             el.style.zIndex = "100";
             el.style.transition = "none";
@@ -230,9 +214,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             longPressTriggered.current = true;
             setIsJiggleMode(true);
             if (navigator.vibrate) navigator.vibrate(50);
-            
-            // If user holds without moving, enter drag mode under finger immediately?
-            // iOS style: yes.
         }, 500);
     }
   };
@@ -281,14 +262,12 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         // DIRECT DOM UPDATE
         const el = itemsRef.current.get(activeDragIndex);
         if (el) {
-            // Apply transform immediately, bypassing RAF loop for position
             el.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${springSystem.current.scale})`;
             el.style.zIndex = "100";
             el.style.transition = "none";
         }
 
         // --- DOCK DETECTION ---
-        // Use cached rect for Dock if possible, or just bounds
         let isOverDock = false;
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
@@ -315,28 +294,22 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             let maxScore = 0;
             let bestTargetIndex = -1;
 
-            // Iterate apps to check intersection
-            // OPTIMIZATION: Use cachedRects instead of getBoundingClientRect()
             apps.forEach((app, index) => {
                 if (app.id === activeDragIndex) return;
                 
                 const targetRect = cachedRects.current.get(app.id);
                 if (!targetRect) return;
 
-                // Simple point-in-rect check for cursor/center
-                // Or use intersection area
                 const isInside = 
                    dragCenterX > targetRect.left && 
                    dragCenterX < targetRect.right && 
                    dragCenterY > targetRect.top && 
                    dragCenterY < targetRect.bottom;
                 
-                // Distance based score to find closest center if multiple overlap
                 if (isInside) {
                      const targetCenterX = targetRect.left + targetRect.width / 2;
                      const targetCenterY = targetRect.top + targetRect.height / 2;
                      const dist = Math.hypot(dragCenterX - targetCenterX, dragCenterY - targetCenterY);
-                     // Score is inverse of distance
                      const score = 1000 - dist; 
                      
                      if (score > maxScore) {
@@ -359,15 +332,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                          return newApps;
                      });
                      
-                     // UPDATE CACHE MANUALLY
-                     // We swapped App A and App B. 
-                     // App A is now in Slot B. App B is in Slot A.
-                     // The cachedRect for App A should become Slot B's rect.
                      cachedRects.current.set(activeDragIndex, targetRect);
                      cachedRects.current.set(targetAppId, oldRect);
 
-                     // COMPENSATE FOR LAYOUT SHIFT
-                     // NewOffset = OldOffset - (NewSlotPos - OldSlotPos)
                      const deltaX = targetRect.left - oldRect.left;
                      const deltaY = targetRect.top - oldRect.top;
                      
@@ -376,7 +343,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                      touchStartPos.current.x += deltaX;
                      touchStartPos.current.y += deltaY;
                      
-                     // Force immediate update to prevent flicker
                      if (el) {
                          el.style.transform = `translate3d(${springSystem.current.x}px, ${springSystem.current.y}px, 0) scale(${springSystem.current.scale})`;
                      }
@@ -463,16 +429,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     }
   };
 
-  const removeApp = (e: React.MouseEvent | React.TouchEvent, id: string, fromDock: boolean = false) => {
-     e.stopPropagation();
-     e.preventDefault();
-     if (fromDock) {
-        setDockApps(prev => prev.filter(app => app.id !== id));
-     } else {
-        setApps(prev => prev.filter(app => app.id !== id));
-     }
-  };
-
   // Generalized Render Function
   const renderAppIcon = (app: AppItem, index: number, isDock: boolean) => {
     const isDragging = app.id === activeDragIndex;
@@ -481,9 +437,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         WebkitTouchCallout: 'none',
         WebkitUserSelect: 'none',
         userSelect: 'none',
-        // Critical: When dragging, we use direct manipulation (no transition).
-        // When settling (after drag), the Spring Loop handles it (no transition).
-        // Only other items get the CSS grid transition.
         transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
         zIndex: isDragging ? 100 : 'auto',
         transform: isDragging ? undefined : 'translate(0,0) scale(1)', 
@@ -520,16 +473,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                 style={{ animationDelay: `${(index * 0.1) % 1}s` }}
             >
                 <div className={isDock ? "scale-90" : ""}>{app.icon}</div>
-                
-                {isJiggleMode && (
-                    <button 
-                    onClick={(e) => removeApp(e, app.id, isDock)}
-                    onTouchEnd={(e) => removeApp(e, app.id, isDock)}
-                    className="absolute -top-2 -left-2 w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white border border-white z-20 hover:bg-red-500 transition-colors pointer-events-auto"
-                    >
-                    <span className="w-3 h-0.5 bg-white"></span>
-                    </button>
-                )}
+                {/* Delete button removed */}
             </div>
             {!isDock && (
                 <span className={`text-xs font-medium ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`} style={{ animationDelay: `${(index * 0.1) % 1}s` }}>{app.label}</span>
