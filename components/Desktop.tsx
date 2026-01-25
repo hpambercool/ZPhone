@@ -15,8 +15,6 @@ interface AppItem {
   icon: React.ReactNode;
   color: string;
   isMock?: boolean;
-  type?: 'app' | 'folder';
-  children?: AppItem[];
 }
 
 const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
@@ -26,11 +24,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   // Drag State
   const [activeDragIndex, setActiveDragIndex] = useState<string | null>(null); // App ID
   const [dragSource, setDragSource] = useState<'desktop' | 'dock' | null>(null);
-
-  // Folder Merge State
-  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
-  const folderTimer = useRef<any>(null);
-  const folderTargetRef = useRef<string | null>(null);
 
   // Physics System
   const springSystem = useRef({
@@ -64,24 +57,21 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
       path: '/chat', 
       label: '聊天', 
       color: 'bg-blue-600/60', 
-      icon: <IconChat className="w-8 h-8 text-white" />,
-      type: 'app'
+      icon: <IconChat className="w-8 h-8 text-white" /> 
     },
     { 
       id: 'worldbook', 
       path: '/worldbook', 
       label: '世界书', 
       color: 'bg-amber-700/60', 
-      icon: <IconBook className="w-8 h-8 text-amber-200" />,
-      type: 'app'
+      icon: <IconBook className="w-8 h-8 text-amber-200" /> 
     },
     { 
       id: 'settings', 
       path: '/settings', 
       label: '设置', 
       color: 'bg-slate-600/60', 
-      icon: <IconSettings className="w-8 h-8 text-gray-200" />,
-      type: 'app'
+      icon: <IconSettings className="w-8 h-8 text-gray-200" /> 
     },
     { 
       id: 'music', 
@@ -89,8 +79,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
       label: '音乐', 
       color: 'bg-indigo-500/40', 
       icon: <div className="w-8 h-8 rounded-full bg-white/20"></div>, 
-      isMock: true,
-      type: 'app'
+      isMock: true 
     }
   ]);
 
@@ -98,32 +87,34 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const [dockApps, setDockApps] = useState<AppItem[]>([]);
 
   // Physics Constants
-  const SPRING_STIFFNESS = 220; 
+  const SPRING_STIFFNESS = 220; // Stiffer for snappier return
   const SPRING_DAMPING = 20;
   const SPRING_MASS = 1;
-  const DT = 1 / 60; 
+  const DT = 1 / 60; // Standard 60fps step
 
   // Clean up
   useEffect(() => {
     return () => {
       if (longPressTimer.current) clearTimeout(longPressTimer.current);
-      if (folderTimer.current) clearTimeout(folderTimer.current);
       if (rafId.current) cancelAnimationFrame(rafId.current);
     };
   }, []);
 
-  // --- Physics Loop ---
+  // --- Physics Loop (Run only when released or animating scale) ---
   const runSpringSimulation = () => {
     const state = springSystem.current;
 
+    // If active and dragging, we only animate SCALE in the loop (lifting effect)
+    // Position is handled directly in touchMove for zero latency
     if (activeDragIndex && state.active) {
-        // Scale Physics
+        
+        // --- SCALE PHYSICS (Always runs if active) ---
         const fScale = -SPRING_STIFFNESS * (state.scale - state.targetScale) - SPRING_DAMPING * state.vScale;
         const aScale = fScale / SPRING_MASS;
         state.vScale += aScale * DT;
         state.scale += state.vScale * DT;
 
-        // Position Physics (Only if NOT dragging)
+        // --- POSITION PHYSICS (Only if NOT dragging) ---
         if (!state.isDragging) {
             const fx = -SPRING_STIFFNESS * (state.x - state.targetX) - SPRING_DAMPING * state.vx;
             const fy = -SPRING_STIFFNESS * (state.y - state.targetY) - SPRING_DAMPING * state.vy;
@@ -136,21 +127,41 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             state.y += state.vy * DT;
         }
 
+        // Apply Transform
         const el = itemsRef.current.get(activeDragIndex);
         if (el) {
+            // If dragging, X/Y are updated by touchMove directly. 
+            // However, to keep scale animation smooth, we apply it here.
+            // But touchMove might have set a more recent X/Y. 
+            // To avoid conflict:
+            // 1. If dragging, we read current X/Y (which are set by touchMove) and just apply scale.
+            // 2. If not dragging, we apply the spring X/Y.
+            
+            // Actually, for pure 1:1, touchMove handles the transform. 
+            // We only need this loop for 'Settling' (finger up) OR 'Scaling' (pick up).
+            
+            // If dragging, let touchMove handle the Translation, this loop handles Scale?
+            // CSS Transform takes one string. We can't update separately.
+            // Strategy: touchMove updates state.x/y AND applies transform.
+            // This loop updates state.scale AND applies transform (using latest state.x/y).
+            // Since RAF and touchMove are async, it might be fine.
+            
             el.style.transform = `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`;
             el.style.zIndex = "100";
             el.style.transition = "none";
         }
 
+        // Settle Check
         const isPosSettled = Math.abs(state.x) < 0.5 && Math.abs(state.y) < 0.5 && Math.abs(state.vx) < 1 && Math.abs(state.vy) < 1;
         const isScaleSettled = Math.abs(state.scale - state.targetScale) < 0.005 && Math.abs(state.vScale) < 0.05;
 
         if (!state.isDragging && isPosSettled && isScaleSettled) {
+            // Snap to finish
             state.x = 0; state.y = 0; state.vx = 0; state.vy = 0;
             state.scale = 1; state.vScale = 0;
             state.active = false;
             
+            // Reset style to rely on CSS layout
             if (el) {
                el.style.transform = "";
                el.style.zIndex = "";
@@ -188,6 +199,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
     
+    // Reset Velocity Tracking
     velocityRef.current = { 
         vx: 0, vy: 0, 
         lastX: touch.clientX, lastY: touch.clientY, 
@@ -197,14 +209,19 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     longPressTriggered.current = false;
 
     if (isJiggleMode) {
+        // Cache layout immediately before dragging starts
         updateCachedRects();
+
         setActiveDragIndex(app.id);
         setDragSource(source);
 
         const state = springSystem.current;
         state.isDragging = true;
         state.active = true;
-        state.targetScale = 1.15;
+        state.targetScale = 1.15; // Lift up effect
+        
+        // Keep current visual position if it was already moving (rare), or start at 0
+        // Usually start at 0 relative to slot
         state.scale = state.scale || 1; 
         
         startSpringLoop();
@@ -213,6 +230,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             longPressTriggered.current = true;
             setIsJiggleMode(true);
             if (navigator.vibrate) navigator.vibrate(50);
+            
+            // If user holds without moving, enter drag mode under finger immediately?
+            // iOS style: yes.
         }, 500);
     }
   };
@@ -223,6 +243,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     const currentY = touch.clientY;
     const now = Date.now();
 
+    // Calculate Velocity
     const dt = now - velocityRef.current.lastTime;
     if (dt > 0) {
         const dx = currentX - velocityRef.current.lastX;
@@ -236,6 +257,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     velocityRef.current.lastY = currentY;
     velocityRef.current.lastTime = now;
 
+    // Check movement to cancel long press
     if (longPressTimer.current && touchStartPos.current && !isJiggleMode) {
         const dx = currentX - touchStartPos.current.x;
         const dy = currentY - touchStartPos.current.y;
@@ -245,74 +267,28 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         }
     }
 
+    // Drag Logic
     if (isJiggleMode && activeDragIndex && dragSource && touchStartPos.current) {
         if (e.cancelable) e.preventDefault();
 
+        // 1. Direct Mapping (No Physics Lag)
         const offsetX = currentX - touchStartPos.current.x;
         const offsetY = currentY - touchStartPos.current.y;
         
         springSystem.current.x = offsetX;
         springSystem.current.y = offsetY;
         
+        // DIRECT DOM UPDATE
         const el = itemsRef.current.get(activeDragIndex);
         if (el) {
+            // Apply transform immediately, bypassing RAF loop for position
             el.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${springSystem.current.scale})`;
             el.style.zIndex = "100";
             el.style.transition = "none";
         }
 
-        // --- FOLDER DETECTION ---
-        let isHoveringFolderTarget = false;
-        if (dragSource === 'desktop') {
-             for (const app of apps) {
-                 if (app.id === activeDragIndex) continue;
-                 
-                 const rect = cachedRects.current.get(app.id);
-                 const startRect = cachedRects.current.get(activeDragIndex);
-                 
-                 if (rect && startRect) {
-                     const centerX = rect.left + rect.width / 2;
-                     const centerY = rect.top + rect.height / 2;
-                     
-                     const dragCenterX = startRect.left + startRect.width / 2 + offsetX;
-                     const dragCenterY = startRect.top + startRect.height / 2 + offsetY;
-                     
-                     // 25px threshold (approx 20px requested)
-                     const dist = Math.hypot(dragCenterX - centerX, dragCenterY - centerY);
-                     
-                     if (dist < 25) { 
-                         isHoveringFolderTarget = true;
-                         
-                         if (folderTargetRef.current !== app.id) {
-                             folderTargetRef.current = app.id;
-                             if (folderTimer.current) clearTimeout(folderTimer.current);
-                             folderTimer.current = setTimeout(() => {
-                                 setMergeTargetId(app.id);
-                                 if (navigator.vibrate) navigator.vibrate(40);
-                             }, 300);
-                         }
-                         break;
-                     }
-                 }
-             }
-        }
-        
-        if (!isHoveringFolderTarget) {
-            if (folderTimer.current) {
-                clearTimeout(folderTimer.current);
-                folderTimer.current = null;
-            }
-            folderTargetRef.current = null;
-            setMergeTargetId(null);
-        }
-
-        // --- SWAP LOGIC ---
-        // If we are hovering a potential folder target (or already marked for merge),
-        // we suppress the swap logic to prevent the target from moving away.
-        if (isHoveringFolderTarget || mergeTargetId) {
-             return; 
-        }
-
+        // --- DOCK DETECTION ---
+        // Use cached rect for Dock if possible, or just bounds
         let isOverDock = false;
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
@@ -323,35 +299,44 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 
         if (isOverDock) return;
 
+        // --- SWAP LOGIC ---
         if (dragSource === 'desktop') {
             const currentIndex = apps.findIndex(a => a.id === activeDragIndex);
             if (currentIndex === -1) return;
             
+            // Get current drag rect based on cache + offset
             const currentSlotRect = cachedRects.current.get(activeDragIndex);
             if (!currentSlotRect) return;
 
+            // Approximate visual center of dragged item
             const dragCenterX = currentSlotRect.left + (currentSlotRect.width / 2) + offsetX;
             const dragCenterY = currentSlotRect.top + (currentSlotRect.height / 2) + offsetY;
 
             let maxScore = 0;
             let bestTargetIndex = -1;
 
+            // Iterate apps to check intersection
+            // OPTIMIZATION: Use cachedRects instead of getBoundingClientRect()
             apps.forEach((app, index) => {
                 if (app.id === activeDragIndex) return;
                 
                 const targetRect = cachedRects.current.get(app.id);
                 if (!targetRect) return;
 
+                // Simple point-in-rect check for cursor/center
+                // Or use intersection area
                 const isInside = 
                    dragCenterX > targetRect.left && 
                    dragCenterX < targetRect.right && 
                    dragCenterY > targetRect.top && 
                    dragCenterY < targetRect.bottom;
                 
+                // Distance based score to find closest center if multiple overlap
                 if (isInside) {
                      const targetCenterX = targetRect.left + targetRect.width / 2;
                      const targetCenterY = targetRect.top + targetRect.height / 2;
                      const dist = Math.hypot(dragCenterX - targetCenterX, dragCenterY - targetCenterY);
+                     // Score is inverse of distance
                      const score = 1000 - dist; 
                      
                      if (score > maxScore) {
@@ -374,9 +359,15 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                          return newApps;
                      });
                      
+                     // UPDATE CACHE MANUALLY
+                     // We swapped App A and App B. 
+                     // App A is now in Slot B. App B is in Slot A.
+                     // The cachedRect for App A should become Slot B's rect.
                      cachedRects.current.set(activeDragIndex, targetRect);
                      cachedRects.current.set(targetAppId, oldRect);
 
+                     // COMPENSATE FOR LAYOUT SHIFT
+                     // NewOffset = OldOffset - (NewSlotPos - OldSlotPos)
                      const deltaX = targetRect.left - oldRect.left;
                      const deltaY = targetRect.top - oldRect.top;
                      
@@ -385,6 +376,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                      touchStartPos.current.x += deltaX;
                      touchStartPos.current.y += deltaY;
                      
+                     // Force immediate update to prevent flicker
                      if (el) {
                          el.style.transform = `translate3d(${springSystem.current.x}px, ${springSystem.current.y}px, 0) scale(${springSystem.current.scale})`;
                      }
@@ -401,66 +393,13 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
     }
-    // Clear folder timer
-    if (folderTimer.current) {
-        clearTimeout(folderTimer.current);
-        folderTimer.current = null;
-    }
-    folderTargetRef.current = null;
 
     if (isJiggleMode && activeDragIndex && dragSource && touchStartPos.current) {
         const touch = e.changedTouches[0];
         const currentX = touch.clientX;
         const currentY = touch.clientY;
         
-        // --- FOLDER MERGE ---
-        if (mergeTargetId) {
-            const dragIdx = apps.findIndex(a => a.id === activeDragIndex);
-            const targetIdx = apps.findIndex(a => a.id === mergeTargetId);
-            
-            if (dragIdx !== -1 && targetIdx !== -1) {
-                const dragItem = apps[dragIdx];
-                const targetItem = apps[targetIdx];
-                
-                let newFolder: AppItem;
-                
-                if (targetItem.type === 'folder') {
-                     // Add to existing folder
-                     newFolder = {
-                         ...targetItem,
-                         children: [...(targetItem.children || []), dragItem]
-                     };
-                } else {
-                    // Create new folder
-                    newFolder = {
-                        id: `folder-${Date.now()}`,
-                        path: '',
-                        label: '文件夹',
-                        color: 'bg-white/20 backdrop-blur-xl',
-                        icon: null,
-                        type: 'folder',
-                        children: [targetItem, dragItem]
-                    };
-                }
-                
-                setApps(prev => {
-                    const newApps = [...prev];
-                    return newApps.map(app => {
-                        if (app.id === mergeTargetId) return newFolder;
-                        return app;
-                    }).filter(app => app.id !== activeDragIndex);
-                });
-                
-                // Reset everything and stop drag
-                setMergeTargetId(null);
-                setActiveDragIndex(null);
-                setDragSource(null);
-                touchStartPos.current = null;
-                return; // Stop physics loop
-            }
-        }
-
-        // --- DROP LOGIC (if not merging) ---
+        // --- DROP LOGIC ---
         let isOverDock = false;
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
@@ -470,6 +409,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             }
         }
 
+        // 1. Desktop -> Dock
         if (dragSource === 'desktop' && isOverDock) {
             if (dockApps.length < 4) {
                 const appIndex = apps.findIndex(a => a.id === activeDragIndex);
@@ -481,6 +421,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                 }
             }
         }
+        // 2. Dock -> Desktop
         else if (dragSource === 'dock' && !isOverDock) {
             const appIndex = dockApps.findIndex(a => a.id === activeDragIndex);
             if (appIndex !== -1) {
@@ -498,14 +439,14 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         state.targetY = 0;
         state.targetScale = 1;
         
+        // Inject Throw Velocity
         state.vx = velocityRef.current.vx;
         state.vy = velocityRef.current.vy;
 
+        // Start Physics
         startSpringLoop();
     }
-    
-    // Clear states if we didn't return early
-    setMergeTargetId(null);
+
     setDragSource(null);
     touchStartPos.current = null;
   };
@@ -516,11 +457,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         return;
     }
     if (isJiggleMode) return;
-    
-    if (app.type === 'folder') {
-        // Expand folder logic could go here, for now strictly UI
-        return;
-    }
     
     if (!app.isMock && app.path) {
       navigate(app.path);
@@ -537,17 +473,20 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
      }
   };
 
+  // Generalized Render Function
   const renderAppIcon = (app: AppItem, index: number, isDock: boolean) => {
     const isDragging = app.id === activeDragIndex;
-    const isMergeTarget = app.id === mergeTargetId;
-
+    
     const style: React.CSSProperties = {
         WebkitTouchCallout: 'none',
         WebkitUserSelect: 'none',
         userSelect: 'none',
+        // Critical: When dragging, we use direct manipulation (no transition).
+        // When settling (after drag), the Spring Loop handles it (no transition).
+        // Only other items get the CSS grid transition.
         transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-        zIndex: isDragging ? 100 : (isMergeTarget ? 50 : 'auto'),
-        transform: isDragging ? undefined : `translate(0,0) scale(${isMergeTarget ? 1.1 : 1})`, 
+        zIndex: isDragging ? 100 : 'auto',
+        transform: isDragging ? undefined : 'translate(0,0) scale(1)', 
         touchAction: isDragging ? 'none' : 'auto',
     };
 
@@ -577,23 +516,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             } ${app.isMock ? 'opacity-90' : ''}`}
         >
             <div 
-                className={`${isDock ? 'w-14 h-14' : 'w-16 h-16'} rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging && !isMergeTarget ? 'animate-jiggle' : ''} ${isMergeTarget ? 'ring-2 ring-white/40 bg-white/30' : ''}`}
+                className={`${isDock ? 'w-14 h-14' : 'w-16 h-16'} rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
                 style={{ animationDelay: `${(index * 0.1) % 1}s` }}
             >
-                {app.type === 'folder' && app.children ? (
-                     <div className="grid grid-cols-2 gap-1 p-2 w-full h-full">
-                         {app.children.slice(0, 4).map((child, i) => (
-                             <div key={i} className="w-full h-full rounded-[4px] overflow-hidden relative">
-                                 <div className={`absolute inset-0 ${child.color}`}></div>
-                                 <div className="absolute inset-0 flex items-center justify-center scale-50 text-white">
-                                     {child.icon}
-                                 </div>
-                             </div>
-                         ))}
-                     </div>
-                ) : (
-                    <div className={isDock ? "scale-90" : ""}>{app.icon}</div>
-                )}
+                <div className={isDock ? "scale-90" : ""}>{app.icon}</div>
                 
                 {isJiggleMode && (
                     <button 
@@ -606,7 +532,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                 )}
             </div>
             {!isDock && (
-                <span className={`text-xs font-medium ${isJiggleMode && !isDragging && !isMergeTarget ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`} style={{ animationDelay: `${(index * 0.1) % 1}s` }}>{app.label}</span>
+                <span className={`text-xs font-medium ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`} style={{ animationDelay: `${(index * 0.1) % 1}s` }}>{app.label}</span>
             )}
         </div>
     );
@@ -619,6 +545,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 
   return (
     <>
+      {/* Background Tap Area to exit Jiggle Mode */}
       {isJiggleMode && (
         <div 
            className="absolute inset-0 z-0" 
@@ -626,6 +553,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         ></div>
       )}
 
+      {/* Done Button for Jiggle Mode */}
       {isJiggleMode && (
          <div className="absolute top-14 right-6 z-50 animate-pop-in">
             <button 
@@ -637,8 +565,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
          </div>
       )}
 
+      {/* Home Screen Content */}
       <div className={`absolute inset-0 pt-20 px-6 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isBlurred ? 'scale-90 opacity-0 pointer-events-none blur-sm' : 'scale-100 opacity-100 blur-0'}`}>
         
+        {/* Date/Time Widget */}
         <div className={`mt-8 mb-12 text-center transition-opacity ${isJiggleMode ? 'opacity-40' : 'opacity-100'}`}>
            <h1 className={`text-7xl font-thin tracking-tighter select-none ${textColor} ${textShadow}`}>
              {new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -648,11 +578,13 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
            </p>
         </div>
 
+        {/* App Grid */}
         <div className="grid grid-cols-4 gap-6 px-2 relative z-10 select-none">
           {apps.map((app, index) => renderAppIcon(app, index, false))}
         </div>
       </div>
 
+      {/* Dock */}
       <div 
         ref={dockRef}
         className={`absolute bottom-6 left-4 right-4 h-24 glass-panel rounded-[2.5rem] flex items-center justify-around px-4 z-20 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isBlurred ? 'scale-90 opacity-0 pointer-events-none blur-sm' : 'scale-100 opacity-100 blur-0'}`}
