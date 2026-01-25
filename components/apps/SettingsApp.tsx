@@ -14,7 +14,8 @@ interface SettingsAppProps {
 
 const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, setTheme, closeApp: _closeApp }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'about'>('general');
+  const activeTabState = useState<'general' | 'appearance' | 'about'>('general');
+  const [activeTab, setActiveTab] = activeTabState;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isDark = theme === 'dark';
@@ -266,23 +267,29 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
               </div>
 
               {/* Model Selection (Dependent on connection) */}
-              <div className={`${bgPanel} p-5 rounded-2xl transition-opacity ${connectionStatus === 'success' || availableModels.length > 0 ? 'opacity-100' : 'opacity-50'}`}>
+              <div className={`${bgPanel} p-5 rounded-2xl transition-opacity`}>
                 <h2 className={`text-xs font-bold uppercase tracking-wider mb-4 ${textSecondary}`}>模型选择</h2>
                 <div className="relative">
                     <select
-                        value={config.model}
+                        value={config.model || ''}
                         onChange={(e) => setConfig({ ...config, model: e.target.value })}
                         className={`w-full rounded-lg p-3 text-sm focus:outline-none border appearance-none ${bgInput}`}
                     >
-                        <option value={config.model}>{config.model} (当前)</option>
-                        {availableModels.length > 0 ? (
-                            availableModels.map(m => (
-                                <option key={m} value={m}>{m}</option>
-                            ))
+                        {availableModels.length === 0 ? (
+                            <>
+                                <option value="" disabled>无 (请先拉取模型)</option>
+                                {/* Keep the current model visible if it exists, so presets work even before fetching */}
+                                {config.model && <option value={config.model}>{config.model}</option>}
+                            </>
                         ) : (
                             <>
-                                <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
-                                <option value="gemini-3-pro-preview">Gemini 3.0 Pro</option>
+                                {/* Ensure the current model is selectable even if it's not in the fetched list (e.g. custom or old) */}
+                                {!availableModels.includes(config.model) && config.model && (
+                                    <option value={config.model}>{config.model}</option>
+                                )}
+                                {availableModels.map(m => (
+                                    <option key={m} value={m}>{m}</option>
+                                ))}
                             </>
                         )}
                     </select>
