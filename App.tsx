@@ -112,7 +112,8 @@ const App = () => {
   const isVisible = (path: string) => location.pathname.startsWith(path);
 
   // Common wrapper for Apps to handle the slide animation and background
-  const AppWindow = ({ show, children }: { show: boolean, children: React.ReactNode }) => (
+  // Defining children as optional to avoid strict type checking issues on call sites
+  const AppWindow = ({ show, children }: { show: boolean; children?: React.ReactNode }) => (
     <div 
       className={`fixed inset-0 z-20 flex flex-col w-full h-[100dvh] overflow-hidden transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
         show ? 'translate-y-0' : 'translate-y-full pointer-events-none'

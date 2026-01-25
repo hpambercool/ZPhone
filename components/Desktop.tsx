@@ -23,7 +23,8 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const [activeDragIndex, setActiveDragIndex] = useState<number | null>(null);
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
   
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  // Use any to avoid missing Node types in browser environment
+  const longPressTimer = useRef<any>(null);
   const touchStartPos = useRef<{x: number, y: number} | null>(null);
   const longPressTriggered = useRef(false);
 

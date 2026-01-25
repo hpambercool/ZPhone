@@ -1,3 +1,4 @@
+
 export enum AppId {
   CHAT = 'chat',
   SETTINGS = 'settings',
@@ -63,6 +64,7 @@ export interface AppConfig {
   customApiKey?: string;
   presets: ApiPreset[];
   wallpaper?: string;
+  momentsCover?: string;
   showStatusBar?: boolean;
 }
 

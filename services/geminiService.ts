@@ -1,39 +1,45 @@
-import { GoogleGenAI } from "@google/genai";
+
 import { WorldEntry, ChatMessage, AppConfig } from "../types";
 
 const ENV_API_KEY = process.env.API_KEY;
 
-/**
- * Creates a configured GoogleGenAI instance.
- * Priorities: 
- * 1. Custom config passed in (from settings)
- * 2. Environment variable
- */
-const createClient = (customUrl?: string, customKey?: string) => {
-  const apiKey = customKey?.trim() || ENV_API_KEY;
-  
-  if (!apiKey) {
-    throw new Error("System Environment Error: API Key not configured.");
+// Helper to sanitize base URL
+// Ensure it points to the OpenAI-compatible v1 endpoint root if not specified
+const getBaseUrl = (url?: string) => {
+  let baseUrl = url ? url.trim() : "https://api.openai.com/v1";
+  // Remove trailing slash
+  if (baseUrl.endsWith('/')) {
+    baseUrl = baseUrl.slice(0, -1);
   }
-
-  const options: any = { apiKey };
-  if (customUrl?.trim()) {
-    options.baseUrl = customUrl.trim();
+  // Heuristic: if user input doesn't contain /v1, append it. 
+  // This is a common convention for these input fields.
+  if (!baseUrl.includes('/v1')) {
+     baseUrl = `${baseUrl}/v1`;
   }
-
-  return new GoogleGenAI(options);
+  return baseUrl;
 };
 
 export const validateAndListModels = async (apiUrl: string, apiKey: string) => {
   try {
-    const ai = createClient(apiUrl, apiKey);
-    const response = await ai.models.list();
-    // The SDK structure for list() response might vary, usually it returns an object with `models` array
-    // We map it to a simple string array of names
-    if (response && Array.isArray(response)) {
-        return response.map((m: any) => m.name.replace('models/', ''));
-    } else if (response && (response as any).models) {
-        return (response as any).models.map((m: any) => m.name.replace('models/', ''));
+    const baseUrl = getBaseUrl(apiUrl);
+    const key = apiKey?.trim() || ENV_API_KEY || '';
+
+    const response = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+       throw new Error(`Failed to fetch models: ${response.status}`);
+    }
+
+    const data = await response.json();
+    // OpenAI List Models response: { data: [ { id: "..." }, ... ] }
+    if (data && Array.isArray(data.data)) {
+        return data.data.map((m: any) => m.id);
     }
     return [];
   } catch (error) {
@@ -50,10 +56,14 @@ export const getGeminiResponseStream = async (
   systemPromptOverride?: string
 ) => {
   try {
-    // Initialize client using config settings or fallback
-    const ai = createClient(config.customApiUrl, config.customApiKey);
+    const apiKey = config.customApiKey?.trim() || ENV_API_KEY;
+    if (!apiKey) {
+      throw new Error("System Environment Error: API Key not configured.");
+    }
+    
+    const baseUrl = getBaseUrl(config.customApiUrl);
 
-    // Construct System Instruction from WorldBook + Settings
+    // Construct System Instruction
     const activeLore = worldBook
       .filter((entry) => entry.active)
       .map((entry) => `[${entry.title}]: ${entry.content}`)
@@ -65,27 +75,82 @@ export const getGeminiResponseStream = async (
       ? `${baseSystemInstruction}\n\n=== 世界书上下文 (已知事实) ===\n${activeLore}\n=================` 
       : baseSystemInstruction;
 
-    const historyForGemini = history.map(msg => ({
-      role: msg.role,
-      parts: [{ text: msg.text }]
-    }));
+    // Build messages array
+    const messages = [
+        { role: 'system', content: finalSystemInstruction }
+    ];
 
-    const chat = ai.chats.create({
-      model: config.model,
-      history: historyForGemini,
-      config: {
-        systemInstruction: finalSystemInstruction,
-      },
+    history.forEach(msg => {
+        messages.push({
+            role: msg.role === 'model' ? 'assistant' : 'user',
+            content: msg.text
+        });
     });
 
-    const result = await chat.sendMessageStream({
-      message: currentMessage
+    messages.push({ role: 'user', content: currentMessage });
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: config.model,
+            messages: messages,
+            stream: true,
+            temperature: 0.7 
+        })
     });
 
-    return result;
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API Error ${response.status}: ${errText}`);
+    }
+
+    if (!response.body) throw new Error("No response body");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    return {
+        [Symbol.asyncIterator]: async function* () {
+            let buffer = '';
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || ''; 
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed) continue;
+                        if (trimmed === 'data: [DONE]') return;
+                        if (trimmed.startsWith('data: ')) {
+                            try {
+                                const jsonStr = trimmed.slice(6);
+                                const json = JSON.parse(jsonStr);
+                                const content = json.choices?.[0]?.delta?.content;
+                                if (content) {
+                                    yield { text: content };
+                                }
+                            } catch (e) {
+                                console.error('Error parsing SSE:', e);
+                            }
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+        }
+    };
 
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("OpenAI API Error:", error);
     throw error;
   }
 };

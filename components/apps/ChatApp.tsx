@@ -1,9 +1,9 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChatMessage, AppConfig, WorldEntry, Contact, Conversation, ThemeMode, UserPersona } from '../../types';
 import { IconChat, IconUsers, IconUser, IconPlus, IconChevronLeft, IconX, IconCheck, IconSettings } from '../Icons';
 import { getGeminiResponseStream } from '../../services/geminiService';
-import { GenerateContentResponse } from '@google/genai';
 
 // --- Local Icons ---
 const IconMic = ({ className }: { className?: string }) => (
@@ -209,6 +209,10 @@ const ChatApp: React.FC<ChatAppProps> = ({
   const [newPersonaName, setNewPersonaName] = useState('');
   const [showCreatePersona, setShowCreatePersona] = useState(false);
 
+  // Moments Cover State
+  const [isCoverExpanded, setIsCoverExpanded] = useState(false);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
   // --- Effects ---
 
   useEffect(() => {
@@ -321,6 +325,18 @@ const ChatApp: React.FC<ChatAppProps> = ({
       });
   };
 
+  const handleCoverUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setConfig(prev => ({ ...prev, momentsCover: result }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || loading || !activeContactId) return;
     let currentConv = conversations.find(c => c.contactId === activeContactId);
@@ -388,7 +404,7 @@ const ChatApp: React.FC<ChatAppProps> = ({
 
       let accumulatedText = '';
       for await (const chunk of stream) {
-        const c = chunk as GenerateContentResponse;
+        const c = chunk as { text: string };
         const text = c.text;
         if (text) {
           accumulatedText += text;
@@ -998,15 +1014,16 @@ const ChatApp: React.FC<ChatAppProps> = ({
           </div>
 
           {/* Cover Image Area */}
-          <div className="h-80 w-full relative">
+          <div className="h-80 w-full relative group">
               <div 
-                 className="w-full h-full bg-cover bg-center" 
-                 style={{ backgroundImage: config.wallpaper ? `url(${config.wallpaper})` : 'none', backgroundColor: '#333' }}
+                 className="w-full h-full bg-cover bg-center cursor-pointer transition-opacity hover:opacity-90" 
+                 onClick={() => setIsCoverExpanded(true)}
+                 style={{ backgroundImage: `url(${config.momentsCover || config.wallpaper || 'https://i.postimg.cc/sxDg8hrz/dmitrii-shirnin-mq-EKg5D6ln-E-unsplash.jpg'})`, backgroundColor: '#333' }}
               ></div>
-              <div className="absolute inset-0 bg-black/10"></div>
+              <div className="absolute inset-0 bg-black/10 pointer-events-none"></div>
               
               {/* User Info on Cover */}
-              <div className="absolute bottom-[-30px] right-4 flex items-end gap-3 z-10">
+              <div className="absolute bottom-[-30px] right-4 flex items-end gap-3 z-10 pointer-events-none">
                   <span className="text-white font-bold text-lg mb-10 drop-shadow-md shadow-black">{config.userName}</span>
                   <div className={`w-20 h-20 rounded-xl border-2 border-white/10 shadow-lg overflow-hidden ${config.userPersonas?.find(p=>p.id===config.currentPersonaId)?.avatar || 'bg-gray-500'}`}>
                        {/* Avatar content */}
@@ -1100,6 +1117,37 @@ const ChatApp: React.FC<ChatAppProps> = ({
                  </div>
              ))}
           </div>
+
+          {/* Expanded Cover Modal */}
+          {isCoverExpanded && (
+            <div 
+              className="fixed inset-0 z-[100] bg-black flex flex-col justify-center items-center animate-fade-in"
+              onClick={() => setIsCoverExpanded(false)}
+            >
+                <img 
+                    src={config.momentsCover || config.wallpaper || 'https://i.postimg.cc/sxDg8hrz/dmitrii-shirnin-mq-EKg5D6ln-E-unsplash.jpg'} 
+                    className="w-full h-auto max-h-screen object-contain"
+                    alt="cover"
+                />
+                <div 
+                    className="absolute bottom-8 right-6 bg-[#2C2C2C]/80 backdrop-blur-md px-4 py-2 rounded text-white text-sm font-medium cursor-pointer border border-white/10"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        coverInputRef.current?.click();
+                    }}
+                >
+                    更换封面
+                </div>
+                <input 
+                    type="file" 
+                    ref={coverInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleCoverUpload}
+                    onClick={(e) => e.stopPropagation()} 
+                />
+            </div>
+          )}
       </div>
   );
 

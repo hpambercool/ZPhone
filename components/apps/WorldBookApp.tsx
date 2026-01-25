@@ -46,7 +46,7 @@ const WorldBookApp: React.FC<WorldBookAppProps> = ({
     const cats = new Set(entries.map(e => e.category || '默认'));
     cats.add('默认');
     
-    return Array.from(cats).sort((a, b) => {
+    return Array.from(cats).sort((a: string, b: string) => {
         if (a === '默认') return -1;
         if (b === '默认') return 1;
         return a.localeCompare(b);
