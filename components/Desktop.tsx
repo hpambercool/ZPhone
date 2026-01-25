@@ -454,7 +454,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
       {/* Dock */}
       <div 
         ref={dockRef}
-        className="absolute bottom-6 left-4 right-4 h-24 glass-panel rounded-[2.5rem] flex items-center justify-around px-4 z-20"
+        className={`absolute bottom-6 left-4 right-4 h-24 glass-panel rounded-[2.5rem] flex items-center justify-around px-4 z-20 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isBlurred ? 'scale-90 opacity-0 pointer-events-none blur-sm' : 'scale-100 opacity-100 blur-0'}`}
       >
          {/* Render Dock Apps */}
          {dockApps.map((app, index) => renderAppIcon(app, index, true))}
