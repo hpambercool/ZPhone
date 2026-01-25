@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconChat, IconSettings, IconBook } from './Icons';
@@ -23,10 +24,12 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const [activeDragIndex, setActiveDragIndex] = useState<number | null>(null);
   const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
   
-  // Use any to avoid missing Node types in browser environment
   const longPressTimer = useRef<any>(null);
   const touchStartPos = useRef<{x: number, y: number} | null>(null);
   const longPressTriggered = useRef(false);
+  
+  // Store refs to grid items for geometric calculation
+  const itemsRef = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const [apps, setApps] = useState<AppItem[]>([
     { 
@@ -68,16 +71,15 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   }, []);
 
   const handleTouchStart = (e: React.TouchEvent, index: number) => {
-    // We do NOT prevent default here to allow click events for normal taps.
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
-    longPressTriggered.current = false; // Reset trigger state
+    longPressTriggered.current = false;
 
     if (isJiggleMode) {
         setActiveDragIndex(index);
     } else {
         longPressTimer.current = setTimeout(() => {
-            longPressTriggered.current = true; // Mark as triggered so onClick can ignore
+            longPressTriggered.current = true;
             setIsJiggleMode(true);
             if (navigator.vibrate) navigator.vibrate(50);
         }, 500);
@@ -93,7 +95,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     if (longPressTimer.current && touchStartPos.current && !isJiggleMode) {
         const dx = currentX - touchStartPos.current.x;
         const dy = currentY - touchStartPos.current.y;
-        // Increased tolerance to 15px for shaky fingers
         if (Math.abs(dx) > 15 || Math.abs(dy) > 15) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
@@ -102,34 +103,88 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 
     // Drag Logic
     if (isJiggleMode && activeDragIndex !== null && touchStartPos.current) {
-        if (e.cancelable) e.preventDefault(); // Stop scrolling while reordering
+        if (e.cancelable) e.preventDefault();
 
-        const dx = currentX - touchStartPos.current.x;
-        const dy = currentY - touchStartPos.current.y;
-        setDragPosition({ x: dx, y: dy });
+        // Calculate visual drag offset relative to start position
+        const offsetX = currentX - touchStartPos.current.x;
+        const offsetY = currentY - touchStartPos.current.y;
+        setDragPosition({ x: offsetX, y: offsetY });
 
-        // Hit testing for swap
-        // We use elementFromPoint to find which app slot we are hovering over.
-        // We hide the dragged element via pointer-events: none style (see render) so we can hit what's behind it.
-        const targetEl = document.elementFromPoint(currentX, currentY);
-        const appItem = targetEl?.closest('[data-app-index]');
-        
-        if (appItem && appItem instanceof HTMLElement) {
-            const targetIndex = parseInt(appItem.dataset.appIndex || '-1', 10);
-            if (targetIndex !== -1 && targetIndex !== activeDragIndex) {
-                 // Perform Swap
-                 setApps(prev => {
-                     const newApps = [...prev];
-                     const [removed] = newApps.splice(activeDragIndex, 1);
-                     newApps.splice(targetIndex, 0, removed);
-                     return newApps;
-                 });
-                 setActiveDragIndex(targetIndex);
+        // --- MAGNETIC GRID LOGIC ---
+        const currentSlotEl = itemsRef.current.get(activeDragIndex);
+        if (currentSlotEl) {
+            const currentRect = currentSlotEl.getBoundingClientRect();
+            
+            // Calculate the visual center of the dragged item
+            // Base Center + Drag Offset
+            const currentCenter = {
+                x: (currentRect.left + currentRect.width / 2) + offsetX,
+                y: (currentRect.top + currentRect.height / 2) + offsetY
+            };
+
+            let closestIndex = -1;
+            let minDistance = Infinity;
+
+            // Iterate all slots to find nearest neighbor (Euclidean distance)
+            itemsRef.current.forEach((el, index) => {
+                if (index === activeDragIndex) return;
+                
+                const rect = el.getBoundingClientRect();
+                const center = {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2
+                };
+                
+                // Euclidean distance
+                const dist = Math.sqrt(
+                    Math.pow(currentCenter.x - center.x, 2) + 
+                    Math.pow(currentCenter.y - center.y, 2)
+                );
+
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestIndex = index;
+                }
+            });
+
+            // Threshold for swap (approx 2/3 of an icon size to feel "sticky" but responsive)
+            if (closestIndex !== -1 && minDistance < 50) {
+                 const targetSlotEl = itemsRef.current.get(closestIndex);
                  
-                 // Reset drag reference to avoid visual jump after swap re-layout
-                 touchStartPos.current = { x: currentX, y: currentY };
-                 setDragPosition({ x: 0, y: 0 });
-                 if (navigator.vibrate) navigator.vibrate(10);
+                 if (targetSlotEl) {
+                     const targetRect = targetSlotEl.getBoundingClientRect();
+                     
+                     // 1. Perform Swap in Data
+                     setApps(prev => {
+                         const newApps = [...prev];
+                         const [removed] = newApps.splice(activeDragIndex, 1);
+                         newApps.splice(closestIndex, 0, removed);
+                         return newApps;
+                     });
+
+                     // 2. COMPENSATE OFFSET
+                     // When we swap, the underlying DOM element moves from 'currentRect' to 'targetRect'.
+                     // To keep the icon visually under the finger without jumping, we must adjust 
+                     // the reference point (touchStartPos).
+                     // Delta = Movement of the underlying base slot
+                     const deltaX = targetRect.left - currentRect.left;
+                     const deltaY = targetRect.top - currentRect.top;
+
+                     if (touchStartPos.current) {
+                        touchStartPos.current.x += deltaX;
+                        touchStartPos.current.y += deltaY;
+                     }
+                     
+                     // 3. Update internal state immediately to reflect new anchor
+                     // New Drag Position = Current Touch - New Anchor
+                     setDragPosition({
+                        x: currentX - touchStartPos.current!.x,
+                        y: currentY - touchStartPos.current!.y
+                     });
+
+                     setActiveDragIndex(closestIndex);
+                     if (navigator.vibrate) navigator.vibrate(10);
+                 }
             }
         }
     }
@@ -140,15 +195,17 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
     }
+    // Reset drag state
+    // By clearing this, the inline 'transform' style is removed.
+    // The CSS 'transition-transform' class will then animate the icon 
+    // from its last drag position back to (0,0) - the center of the slot.
     setActiveDragIndex(null);
     setDragPosition({ x: 0, y: 0 });
-    // Note: We do NOT reset longPressTriggered here, because onClick fires after onTouchEnd.
   };
 
   const handleAppClick = (app: AppItem) => {
-    // If we just triggered a long press, do NOT enter the app
     if (longPressTriggered.current) {
-        longPressTriggered.current = false; // Reset for next time
+        longPressTriggered.current = false;
         return;
     }
     if (isJiggleMode) return;
@@ -231,37 +288,47 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
               <div
                 key={app.id}
                 data-app-index={index}
+                ref={(el) => {
+                    if (el) itemsRef.current.set(index, el);
+                    else itemsRef.current.delete(index);
+                }}
                 onTouchStart={(e) => handleTouchStart(e, index)}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
-                // Also support mouse for desktop testing
+                // Mouse event handlers for desktop testing compatibility
                 onMouseDown={(e) => {
-                    // Simple mouse support for testing, not full drag
-                    if (isJiggleMode) setActiveDragIndex(index);
+                     // Basic mouse support simulation
+                     if (isJiggleMode) {
+                         const mouseE = e as unknown as React.TouchEvent;
+                         // Mocking touches[0]
+                         (mouseE as any).touches = [{ clientX: e.clientX, clientY: e.clientY }];
+                         handleTouchStart(mouseE, index);
+                     }
                 }}
                 onClick={() => handleAppClick(app)}
                 onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                 }}
-                // Important Styles for iOS
                 style={{ 
                     WebkitTouchCallout: 'none',
                     WebkitUserSelect: 'none',
                     userSelect: 'none',
-                    touchAction: isDragging ? 'none' : 'auto', // Prevent browser gestures only when dragging
-                    ...(isDragging ? { 
-                        transform: `translate(${dragPosition.x}px, ${dragPosition.y}px) scale(1.1)`, 
-                        zIndex: 50,
-                        pointerEvents: 'none' // allow hit testing through
-                    } : {})
+                    touchAction: isDragging ? 'none' : 'auto', 
+                    transform: isDragging 
+                        ? `translate(${dragPosition.x}px, ${dragPosition.y}px) scale(1.15)` 
+                        : 'translate(0px, 0px) scale(1)', 
+                    zIndex: isDragging ? 50 : 'auto',
+                    pointerEvents: isDragging ? 'none' : 'auto', // Allow hit testing through dragging element
+                    // Vital: Disable transition during drag for instant response, enable on release for "Snap"
+                    transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' 
                 }}
-                className={`flex flex-col items-center gap-2 group transition-transform duration-200 relative ${
+                className={`flex flex-col items-center gap-2 group relative ${
                   isDragging ? '' : (isJiggleMode ? '' : 'hover:scale-105 active:scale-95')
                 } ${app.isMock ? 'opacity-90' : ''}`}
               >
                 <div 
-                  className={`w-16 h-16 rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg transition-all border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
+                  className={`w-16 h-16 rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
                   style={{ animationDelay: `${Math.random() * -0.5}s` }}
                 >
                   {app.icon}
