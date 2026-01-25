@@ -34,6 +34,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const itemsRef = useRef<Map<number, HTMLDivElement>>(new Map()); // Desktop items
   const dockRef = useRef<HTMLDivElement>(null); // Dock container
 
+  // Velocity Tracking Ref
+  const velocityRef = useRef({ vx: 0, vy: 0, lastX: 0, lastY: 0, lastTime: 0 });
+
   // Desktop Apps
   const [apps, setApps] = useState<AppItem[]>([
     { 
@@ -67,7 +70,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     }
   ]);
 
-  // Dock Apps (Initially empty as requested)
+  // Dock Apps
   const [dockApps, setDockApps] = useState<AppItem[]>([]);
 
   // Clean up timer on unmount
@@ -80,6 +83,14 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const handleTouchStart = (e: React.TouchEvent, index: number, source: 'desktop' | 'dock') => {
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    
+    // Reset Velocity Tracking
+    velocityRef.current = { 
+        vx: 0, vy: 0, 
+        lastX: touch.clientX, lastY: touch.clientY, 
+        lastTime: Date.now() 
+    };
+
     longPressTriggered.current = false;
 
     if (isJiggleMode) {
@@ -98,6 +109,23 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     const touch = e.touches[0];
     const currentX = touch.clientX;
     const currentY = touch.clientY;
+    const now = Date.now();
+
+    // Calculate Velocity
+    const dt = now - velocityRef.current.lastTime;
+    if (dt > 0) {
+        const dx = currentX - velocityRef.current.lastX;
+        const dy = currentY - velocityRef.current.lastY;
+        const vx = dx / dt;
+        const vy = dy / dt;
+        
+        // Apply simple smoothing (EMA)
+        velocityRef.current.vx = vx * 0.5 + velocityRef.current.vx * 0.5;
+        velocityRef.current.vy = vy * 0.5 + velocityRef.current.vy * 0.5;
+    }
+    velocityRef.current.lastX = currentX;
+    velocityRef.current.lastY = currentY;
+    velocityRef.current.lastTime = now;
 
     // Check movement to cancel long press if not yet in jiggle mode
     if (longPressTimer.current && touchStartPos.current && !isJiggleMode) {
@@ -119,37 +147,26 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         setDragPosition({ x: offsetX, y: offsetY });
 
         // --- 1. DETECT DOCK OVERLAP (PRIORITY) ---
-        // Need to calculate current drag rect to check against dock
         let currentRect: DOMRect | undefined;
         
-        // Find the element being dragged to get its dimensions
         if (dragSource === 'desktop') {
             const el = itemsRef.current.get(activeDragIndex);
             if (el) currentRect = el.getBoundingClientRect();
         } else {
-            // If dragging from dock, just estimate size or get from dock children (simplified here)
-             // For simplicity, we assume standard icon size 60x60 approx if specific ref not tracked
+             // Approximation for dock items
              currentRect = { left: 0, top: 0, width: 60, height: 60 } as DOMRect; 
-             // Correction: To be precise we need the element, but let's calculate intersection 
-             // based on pointer position for dock logic if element ref is missing, 
-             // or use the stored start pos + offset.
         }
 
         let isOverDock = false;
         
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
-            // Approximating drag rect based on pointer for Dock detection to be snappy
-            // Or use the actual element position if available
-            const dragItemWidth = 64; // Approx icon width
+            const dragItemWidth = 64; 
             const dragItemHeight = 64;
             
-            // Calculate absolute position of the dragged item center
-            // Origin (Start Touch) + Offset
-            const absoluteX = touchStartPos.current.x + offsetX; // This is pointer pos relative to start, roughly center
+            const absoluteX = touchStartPos.current.x + offsetX; 
             const absoluteY = touchStartPos.current.y + offsetY; 
 
-            // Construct a virtual rect for the dragged item centered at finger
             const dragRect = {
                 left: absoluteX - dragItemWidth / 2,
                 top: absoluteY - dragItemHeight / 2,
@@ -167,22 +184,17 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             if (interRight > interLeft && interBottom > interTop) {
                 const intersectionArea = (interRight - interLeft) * (interBottom - interTop);
                 const dragArea = dragRect.width * dragRect.height;
-                // Threshold: 30% overlap
                 if (intersectionArea / dragArea > 0.3) {
                     isOverDock = true;
                 }
             }
         }
 
-        // If we are over the Dock, we STOP checking for desktop swaps.
-        // This gives Dock priority.
         if (isOverDock) {
             return; 
         }
 
         // --- 2. DESKTOP GRID SWAP LOGIC ---
-        // Only run if source is desktop (swapping desktop icons)
-        // AND we are not hovering the dock
         if (dragSource === 'desktop') {
             const currentSlotEl = itemsRef.current.get(activeDragIndex);
             if (currentSlotEl) {
@@ -200,7 +212,8 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                 };
                 
                 const dragArea = dragRect.width * dragRect.height;
-                let maxOverlapRatio = 0;
+                
+                let maxScore = 0;
                 let bestTargetIndex = -1;
 
                 itemsRef.current.forEach((el, index) => {
@@ -214,14 +227,51 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                     if (interRight > interLeft && interBottom > interTop) {
                         const intersectionArea = (interRight - interLeft) * (interBottom - interTop);
                         const ratio = intersectionArea / dragArea;
-                        if (ratio > maxOverlapRatio) {
-                            maxOverlapRatio = ratio;
+                        
+                        // Base Score from Overlap
+                        let score = ratio;
+
+                        // --- DIRECTIONAL INTELLIGENCE ---
+                        // If we have some overlap (> 25%), check if velocity vector implies we are "throwing" 
+                        // the icon into this slot.
+                        if (ratio > 0.25) {
+                            const dragCenter = { 
+                                x: dragRect.left + dragRect.width / 2, 
+                                y: dragRect.top + dragRect.height / 2 
+                            };
+                            const targetCenter = { 
+                                x: targetRect.left + targetRect.width / 2, 
+                                y: targetRect.top + targetRect.height / 2 
+                            };
+                            
+                            const vecX = targetCenter.x - dragCenter.x;
+                            const vecY = targetCenter.y - dragCenter.y;
+                            const dist = Math.sqrt(vecX*vecX + vecY*vecY);
+                            
+                            if (dist > 0) {
+                                // Normalized direction vector
+                                const uX = vecX / dist;
+                                const uY = vecY / dist;
+                                
+                                // Project velocity onto target direction
+                                const vProj = velocityRef.current.vx * uX + velocityRef.current.vy * uY;
+                                
+                                // If moving towards target fast enough (e.g. > 0.4 px/ms)
+                                if (vProj > 0.4) {
+                                    score += 0.35; // Boost score significantly
+                                }
+                            }
+                        }
+
+                        if (score > maxScore) {
+                            maxScore = score;
                             bestTargetIndex = index;
                         }
                     }
                 });
 
-                if (bestTargetIndex !== -1 && maxOverlapRatio > 0.5) {
+                // Threshold logic: Standard > 0.5, OR boosted score > 0.5
+                if (bestTargetIndex !== -1 && maxScore > 0.5) {
                      const targetSlotEl = itemsRef.current.get(bestTargetIndex);
                      if (targetSlotEl) {
                          const targetRect = targetSlotEl.getBoundingClientRect();
@@ -276,7 +326,6 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         let isOverDock = false;
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
-            // Simple point check for drop is usually sufficient, but let's use the same box logic roughly
             const dropX = currentX;
             const dropY = currentY;
             
