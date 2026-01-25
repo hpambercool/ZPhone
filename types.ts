@@ -1,4 +1,5 @@
 
+
 export enum AppId {
   CHAT = 'chat',
   SETTINGS = 'settings',
@@ -69,3 +70,14 @@ export interface AppConfig {
 }
 
 export type ThemeMode = 'light' | 'dark';
+
+export interface AppItem {
+  id: string;
+  path: string;
+  label: string;
+  icon: React.ReactNode;
+  color: string;
+  isMock?: boolean;
+  type?: 'app' | 'folder';
+  items?: AppItem[]; // For folders
+}
