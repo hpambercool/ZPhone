@@ -34,7 +34,8 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
   const [inputKey, setInputKey] = useState(config.customApiKey || '');
   const [presetName, setPresetName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  // Initialize with current model to ensure it's visible before fetching
+  const [availableModels, setAvailableModels] = useState<string[]>(config.model ? [config.model] : []);
   const [connectionStatus, setConnectionStatus] = useState<'none' | 'success' | 'error'>('none');
   const [statusMessage, setStatusMessage] = useState('');
 
@@ -47,6 +48,7 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
 
     setIsLoading(true);
     setConnectionStatus('none');
+    
     try {
       const models = await validateAndListModels(inputUrl, inputKey);
       setAvailableModels(models);
@@ -96,6 +98,8 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
       setInputUrl('');
       setInputKey('');
       setConfig(prev => ({ ...prev, customApiUrl: '', customApiKey: '', model: 'gemini-3-flash-preview' }));
+      // Reset available models to default or empty, but keeping current default model visible
+      setAvailableModels(['gemini-3-flash-preview']);
       return;
     }
 
@@ -109,6 +113,8 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
          customApiKey: preset.apiKey,
          model: preset.model
       }));
+      // Ensure the preset's model is visible immediately
+      setAvailableModels([preset.model]);
     }
   };
 
