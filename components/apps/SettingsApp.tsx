@@ -14,7 +14,10 @@ interface SettingsAppProps {
 
 const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, setTheme, closeApp: _closeApp }) => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'about'>('general');
+  // Init activeTab from localStorage to restore state on re-entry
+  const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'about'>(() => {
+    return (localStorage.getItem('os26_settings_tab') as 'general' | 'appearance' | 'about') || 'general';
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isDark = theme === 'dark';
@@ -36,6 +39,7 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'none' | 'success' | 'error'>('none');
   const [statusMessage, setStatusMessage] = useState('');
+  const [saveBtnText, setSaveBtnText] = useState('保存');
 
   const handleTestConnection = async () => {
     if (!inputKey.trim()) {
@@ -139,6 +143,22 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
     }
   };
 
+  const handleSaveAll = () => {
+    // Save Config
+    setConfig(prev => ({
+        ...prev,
+        customApiUrl: inputUrl,
+        customApiKey: inputKey
+    }));
+    
+    // Save UI State (Active Tab)
+    localStorage.setItem('os26_settings_tab', activeTab);
+    
+    // Feedback
+    setSaveBtnText('已保存');
+    setTimeout(() => setSaveBtnText('保存'), 2000);
+  };
+
   return (
     <div className={`h-full flex flex-col ${isDark ? 'bg-slate-900/90 text-white' : 'bg-[#F2F2F7] text-slate-900'}`}>
       {/* Header */}
@@ -146,12 +166,24 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
         <h1 className={`text-3xl font-bold bg-clip-text text-transparent ${headerGradient}`}>
           设置
         </h1>
-        <button 
-           onClick={() => navigate('/')} 
-           className={`p-2 rounded-full transition-colors ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}
-        >
-           <IconX className={`w-5 h-5 ${textPrimary}`} />
-        </button>
+        <div className="flex gap-2">
+            <button 
+               onClick={handleSaveAll}
+               className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
+                 saveBtnText === '已保存' 
+                   ? 'bg-green-500 text-white shadow-lg' 
+                   : (isDark ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-900')
+               }`}
+            >
+               {saveBtnText}
+            </button>
+            <button 
+               onClick={() => navigate('/')} 
+               className={`p-2 rounded-full transition-colors ${isDark ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-100 hover:bg-slate-200'}`}
+            >
+               <IconX className={`w-5 h-5 ${textPrimary}`} />
+            </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
