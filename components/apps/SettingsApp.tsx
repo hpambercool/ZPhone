@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppConfig, ThemeMode, ApiPreset } from '../../types';
@@ -34,7 +33,6 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
   const [inputKey, setInputKey] = useState(config.customApiKey || '');
   const [presetName, setPresetName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  // Default to empty to show "None" ("无") when not connected
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<'none' | 'success' | 'error'>('none');
   const [statusMessage, setStatusMessage] = useState('');
@@ -48,7 +46,6 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
 
     setIsLoading(true);
     setConnectionStatus('none');
-    
     try {
       const models = await validateAndListModels(inputUrl, inputKey);
       setAvailableModels(models);
@@ -98,7 +95,6 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
       setInputUrl('');
       setInputKey('');
       setConfig(prev => ({ ...prev, customApiUrl: '', customApiKey: '', model: 'gemini-3-flash-preview' }));
-      setAvailableModels([]); // Reset to 'None'
       return;
     }
 
@@ -112,7 +108,6 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
          customApiKey: preset.apiKey,
          model: preset.model
       }));
-      setAvailableModels([]); // Reset to 'None' until fetch
     }
   };
 
@@ -271,21 +266,24 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
               </div>
 
               {/* Model Selection (Dependent on connection) */}
-              <div className={`${bgPanel} p-5 rounded-2xl`}>
+              <div className={`${bgPanel} p-5 rounded-2xl transition-opacity ${connectionStatus === 'success' || availableModels.length > 0 ? 'opacity-100' : 'opacity-50'}`}>
                 <h2 className={`text-xs font-bold uppercase tracking-wider mb-4 ${textSecondary}`}>模型选择</h2>
                 <div className="relative">
                     <select
-                        value={availableModels.length > 0 ? config.model : ''}
+                        value={config.model}
                         onChange={(e) => setConfig({ ...config, model: e.target.value })}
                         className={`w-full rounded-lg p-3 text-sm focus:outline-none border appearance-none ${bgInput}`}
-                        disabled={availableModels.length === 0}
                     >
+                        <option value={config.model}>{config.model} (当前)</option>
                         {availableModels.length > 0 ? (
                             availableModels.map(m => (
                                 <option key={m} value={m}>{m}</option>
                             ))
                         ) : (
-                            <option value="">无</option>
+                            <>
+                                <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
+                                <option value="gemini-3-pro-preview">Gemini 3.0 Pro</option>
+                            </>
                         )}
                     </select>
                     <div className={`absolute right-3 top-3 pointer-events-none ${isDark ? 'text-white/50' : 'text-slate-400'}`}>▼</div>
