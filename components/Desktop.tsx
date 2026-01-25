@@ -110,46 +110,58 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         const offsetY = currentY - touchStartPos.current.y;
         setDragPosition({ x: offsetX, y: offsetY });
 
-        // --- MAGNETIC GRID LOGIC ---
+        // --- OVERLAP SWAP LOGIC ---
         const currentSlotEl = itemsRef.current.get(activeDragIndex);
         if (currentSlotEl) {
+            // Get current visual rect (includes scale transform)
             const currentRect = currentSlotEl.getBoundingClientRect();
             
-            // Calculate the visual center of the dragged item
-            // Base Center + Drag Offset
-            const currentCenter = {
-                x: (currentRect.left + currentRect.width / 2) + offsetX,
-                y: (currentRect.top + currentRect.height / 2) + offsetY
+            // Calculate "Base" position by subtracting the current translation (state)
+            // This approximates the slot position. Note: scale effect on 'left' is minor enough to ignore for hit testing.
+            const baseLeft = currentRect.left - dragPosition.x;
+            const baseTop = currentRect.top - dragPosition.y;
+
+            // Compute current Drag Rect based on latest touch offset
+            const dragRect = {
+                left: baseLeft + offsetX,
+                top: baseTop + offsetY,
+                right: baseLeft + offsetX + currentRect.width,
+                bottom: baseTop + offsetY + currentRect.height,
+                width: currentRect.width,
+                height: currentRect.height
             };
+            
+            const dragArea = dragRect.width * dragRect.height;
 
-            let closestIndex = -1;
-            let minDistance = Infinity;
+            let maxOverlapRatio = 0;
+            let bestTargetIndex = -1;
 
-            // Iterate all slots to find nearest neighbor (Euclidean distance)
             itemsRef.current.forEach((el, index) => {
                 if (index === activeDragIndex) return;
                 
-                const rect = el.getBoundingClientRect();
-                const center = {
-                    x: rect.left + rect.width / 2,
-                    y: rect.top + rect.height / 2
-                };
+                const targetRect = el.getBoundingClientRect();
                 
-                // Euclidean distance
-                const dist = Math.sqrt(
-                    Math.pow(currentCenter.x - center.x, 2) + 
-                    Math.pow(currentCenter.y - center.y, 2)
-                );
+                // Calculate Intersection Rectangle
+                const interLeft = Math.max(dragRect.left, targetRect.left);
+                const interTop = Math.max(dragRect.top, targetRect.top);
+                const interRight = Math.min(dragRect.right, targetRect.right);
+                const interBottom = Math.min(dragRect.bottom, targetRect.bottom);
 
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    closestIndex = index;
+                // Check if they actually intersect
+                if (interRight > interLeft && interBottom > interTop) {
+                    const intersectionArea = (interRight - interLeft) * (interBottom - interTop);
+                    const ratio = intersectionArea / dragArea;
+
+                    if (ratio > maxOverlapRatio) {
+                        maxOverlapRatio = ratio;
+                        bestTargetIndex = index;
+                    }
                 }
             });
 
-            // Threshold for swap (approx 2/3 of an icon size to feel "sticky" but responsive)
-            if (closestIndex !== -1 && minDistance < 50) {
-                 const targetSlotEl = itemsRef.current.get(closestIndex);
+            // Threshold: Swap if overlap covers > 50% of the dragged icon
+            if (bestTargetIndex !== -1 && maxOverlapRatio > 0.5) {
+                 const targetSlotEl = itemsRef.current.get(bestTargetIndex);
                  
                  if (targetSlotEl) {
                      const targetRect = targetSlotEl.getBoundingClientRect();
@@ -158,31 +170,40 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                      setApps(prev => {
                          const newApps = [...prev];
                          const [removed] = newApps.splice(activeDragIndex, 1);
-                         newApps.splice(closestIndex, 0, removed);
+                         newApps.splice(bestTargetIndex, 0, removed);
                          return newApps;
                      });
 
-                     // 2. COMPENSATE OFFSET
-                     // When we swap, the underlying DOM element moves from 'currentRect' to 'targetRect'.
-                     // To keep the icon visually under the finger without jumping, we must adjust 
-                     // the reference point (touchStartPos).
-                     // Delta = Movement of the underlying base slot
-                     const deltaX = targetRect.left - currentRect.left;
-                     const deltaY = targetRect.top - currentRect.top;
+                     // 2. COMPENSATE OFFSET for seamless visual continuity
+                     // We calculate the distance between the center of the current slot and the target slot.
+                     // Dragged Item (Base) Center
+                     const currentSlotCenter = {
+                         x: baseLeft + currentRect.width / 2,
+                         y: baseTop + currentRect.height / 2
+                     };
+                     
+                     // Target Item Center
+                     const targetSlotCenter = {
+                         x: targetRect.left + targetRect.width / 2,
+                         y: targetRect.top + targetRect.height / 2
+                     };
+                     
+                     const deltaX = targetSlotCenter.x - currentSlotCenter.x;
+                     const deltaY = targetSlotCenter.y - currentSlotCenter.y;
 
                      if (touchStartPos.current) {
                         touchStartPos.current.x += deltaX;
                         touchStartPos.current.y += deltaY;
                      }
                      
-                     // 3. Update internal state immediately to reflect new anchor
-                     // New Drag Position = Current Touch - New Anchor
+                     // 3. Update State
+                     // Adjust dragPosition relative to the new anchor (touchStartPos)
                      setDragPosition({
                         x: currentX - touchStartPos.current!.x,
                         y: currentY - touchStartPos.current!.y
                      });
 
-                     setActiveDragIndex(closestIndex);
+                     setActiveDragIndex(bestTargetIndex);
                      if (navigator.vibrate) navigator.vibrate(10);
                  }
             }
@@ -363,3 +384,4 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 };
 
 export default Desktop;
+    
