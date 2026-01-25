@@ -17,6 +17,44 @@ interface AppItem {
   isMock?: boolean;
 }
 
+// App Registry for persistence
+const APP_REGISTRY: Record<string, Omit<AppItem, 'id'>> = {
+  chat: { 
+    path: '/chat', 
+    label: '聊天', 
+    color: 'bg-blue-600/60', 
+    icon: <IconChat className="w-8 h-8 text-white" /> 
+  },
+  worldbook: { 
+    path: '/worldbook', 
+    label: '世界书', 
+    color: 'bg-amber-700/60', 
+    icon: <IconBook className="w-8 h-8 text-amber-200" /> 
+  },
+  settings: { 
+    path: '/settings', 
+    label: '设置', 
+    color: 'bg-slate-600/60', 
+    icon: <IconSettings className="w-8 h-8 text-gray-200" /> 
+  },
+  music: { 
+    path: '', 
+    label: '音乐', 
+    color: 'bg-indigo-500/40', 
+    icon: <div className="w-8 h-8 rounded-full bg-white/20"></div>, 
+    isMock: true 
+  }
+};
+
+const DEFAULT_DESKTOP_IDS = ['chat', 'worldbook', 'settings', 'music'];
+const DEFAULT_DOCK_IDS: string[] = [];
+
+const hydrateApps = (ids: string[]): AppItem[] => {
+  return ids
+    .filter(id => APP_REGISTRY[id])
+    .map(id => ({ id, ...APP_REGISTRY[id] }));
+};
+
 const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const navigate = useNavigate();
   const [isJiggleMode, setIsJiggleMode] = useState(false);
@@ -50,41 +88,34 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   // Velocity Tracking Ref (Instantaneous velocity for throw)
   const velocityRef = useRef({ vx: 0, vy: 0, lastX: 0, lastY: 0, lastTime: 0 });
 
-  // Desktop Apps
-  const [apps, setApps] = useState<AppItem[]>([
-    { 
-      id: 'chat', 
-      path: '/chat', 
-      label: '聊天', 
-      color: 'bg-blue-600/60', 
-      icon: <IconChat className="w-8 h-8 text-white" /> 
-    },
-    { 
-      id: 'worldbook', 
-      path: '/worldbook', 
-      label: '世界书', 
-      color: 'bg-amber-700/60', 
-      icon: <IconBook className="w-8 h-8 text-amber-200" /> 
-    },
-    { 
-      id: 'settings', 
-      path: '/settings', 
-      label: '设置', 
-      color: 'bg-slate-600/60', 
-      icon: <IconSettings className="w-8 h-8 text-gray-200" /> 
-    },
-    { 
-      id: 'music', 
-      path: '', 
-      label: '音乐', 
-      color: 'bg-indigo-500/40', 
-      icon: <div className="w-8 h-8 rounded-full bg-white/20"></div>, 
-      isMock: true 
-    }
-  ]);
+  // Desktop Apps - Load from localStorage
+  const [apps, setApps] = useState<AppItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('os26_desktop_layout');
+      if (saved) return hydrateApps(JSON.parse(saved));
+    } catch (e) { console.error('Failed to load desktop layout', e); }
+    return hydrateApps(DEFAULT_DESKTOP_IDS);
+  });
 
-  // Dock Apps
-  const [dockApps, setDockApps] = useState<AppItem[]>([]);
+  // Dock Apps - Load from localStorage
+  const [dockApps, setDockApps] = useState<AppItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('os26_dock_layout');
+      if (saved) return hydrateApps(JSON.parse(saved));
+    } catch (e) { console.error('Failed to load dock layout', e); }
+    return hydrateApps(DEFAULT_DOCK_IDS);
+  });
+
+  // Persistence Effects
+  useEffect(() => {
+    const ids = apps.map(a => a.id);
+    localStorage.setItem('os26_desktop_layout', JSON.stringify(ids));
+  }, [apps]);
+
+  useEffect(() => {
+    const ids = dockApps.map(a => a.id);
+    localStorage.setItem('os26_dock_layout', JSON.stringify(ids));
+  }, [dockApps]);
 
   // Physics Constants
   const SPRING_STIFFNESS = 220; // Stiffer for snappier return
