@@ -232,6 +232,8 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                         let score = ratio;
 
                         // --- DIRECTIONAL INTELLIGENCE ---
+                        // If we have some overlap (> 25%), check if velocity vector implies we are "throwing" 
+                        // the icon into this slot.
                         if (ratio > 0.25) {
                             const dragCenter = { 
                                 x: dragRect.left + dragRect.width / 2, 
@@ -247,10 +249,14 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                             const dist = Math.sqrt(vecX*vecX + vecY*vecY);
                             
                             if (dist > 0) {
+                                // Normalized direction vector
                                 const uX = vecX / dist;
                                 const uY = vecY / dist;
+                                
+                                // Project velocity onto target direction
                                 const vProj = velocityRef.current.vx * uX + velocityRef.current.vy * uY;
                                 
+                                // If moving towards target fast enough (e.g. > 0.4 px/ms)
                                 if (vProj > 0.4) {
                                     score += 0.35; // Boost score significantly
                                 }
@@ -264,6 +270,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                     }
                 });
 
+                // Threshold logic: Standard > 0.5, OR boosted score > 0.5
                 if (bestTargetIndex !== -1 && maxScore > 0.5) {
                      const targetSlotEl = itemsRef.current.get(bestTargetIndex);
                      if (targetSlotEl) {
@@ -311,7 +318,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 
     // --- HANDLE DROPPING LOGIC (Dock vs Desktop) ---
     if (isJiggleMode && activeDragIndex !== null && dragSource && touchStartPos.current) {
-        const touch = e.changedTouches[0];
+        const touch = e.changedTouches[0]; // Use changedTouches for end event
         const currentX = touch.clientX;
         const currentY = touch.clientY;
         
@@ -322,6 +329,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             const dropX = currentX;
             const dropY = currentY;
             
+            // Allow a bit of buffer around dock for "dropping"
             if (dropX >= dockRect.left && dropX <= dockRect.right &&
                 dropY >= dockRect.top - 20 && dropY <= dockRect.bottom + 20) {
                 isOverDock = true;
@@ -331,6 +339,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         // 2. Logic: Desktop -> Dock
         if (dragSource === 'desktop' && isOverDock) {
             if (dockApps.length < 4) {
+                // Move from apps to dockApps
                 const appToMove = apps[activeDragIndex];
                 setApps(prev => prev.filter((_, i) => i !== activeDragIndex));
                 setDockApps(prev => [...prev, appToMove]);
@@ -339,9 +348,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         }
         // 3. Logic: Dock -> Desktop
         else if (dragSource === 'dock' && !isOverDock) {
+            // Move from dockApps to apps
             const appToMove = dockApps[activeDragIndex];
             setDockApps(prev => prev.filter((_, i) => i !== activeDragIndex));
-            setApps(prev => [...prev, appToMove]); 
+            setApps(prev => [...prev, appToMove]); // Add to end of desktop
             if (navigator.vibrate) navigator.vibrate(20);
         }
     }
@@ -390,15 +400,14 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             : 'translate(0px, 0px) scale(1)', 
         zIndex: isDragging ? 100 : 'auto', // High z-index for dragging
         pointerEvents: isDragging ? 'none' : 'auto',
-        // Elastic spring animation on release
-        transition: isDragging ? 'none' : 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)', 
-        willChange: 'transform'
+        transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' 
     };
 
     return (
         <div
             key={app.id}
             data-app-id={app.id}
+            // Only attach ref for desktop items for the grid swap logic
             ref={!isDock ? (el) => {
                 if (el) itemsRef.current.set(index, el);
                 else itemsRef.current.delete(index);
@@ -424,8 +433,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                 className={`${isDock ? 'w-14 h-14' : 'w-16 h-16'} rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
                 style={{ animationDelay: `${Math.random() * -0.5}s` }}
             >
+                {/* Clone icon to adjust size if needed, or just render */}
                 <div className={isDock ? "scale-90" : ""}>{app.icon}</div>
                 
+                {/* Delete Badge */}
                 {isJiggleMode && (
                     <button 
                     onClick={(e) => removeApp(e, app.id, isDock)}
@@ -450,6 +461,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 
   return (
     <>
+      {/* Background Tap Area to exit Jiggle Mode */}
       {isJiggleMode && (
         <div 
            className="absolute inset-0 z-0" 
@@ -457,6 +469,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         ></div>
       )}
 
+      {/* Done Button for Jiggle Mode */}
       {isJiggleMode && (
          <div className="absolute top-14 right-6 z-50 animate-pop-in">
             <button 
@@ -468,8 +481,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
          </div>
       )}
 
+      {/* Home Screen Content */}
       <div className={`absolute inset-0 pt-20 px-6 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isBlurred ? 'scale-90 opacity-0 pointer-events-none blur-sm' : 'scale-100 opacity-100 blur-0'}`}>
         
+        {/* Date/Time Widget */}
         <div className={`mt-8 mb-12 text-center transition-opacity ${isJiggleMode ? 'opacity-40' : 'opacity-100'}`}>
            <h1 className={`text-7xl font-thin tracking-tighter select-none ${textColor} ${textShadow}`}>
              {new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -479,17 +494,21 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
            </p>
         </div>
 
+        {/* App Grid */}
         <div className="grid grid-cols-4 gap-6 px-2 relative z-10 select-none">
           {apps.map((app, index) => renderAppIcon(app, index, false))}
         </div>
       </div>
 
+      {/* Dock */}
       <div 
         ref={dockRef}
         className={`absolute bottom-6 left-4 right-4 h-24 glass-panel rounded-[2.5rem] flex items-center justify-around px-4 z-20 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isBlurred ? 'scale-90 opacity-0 pointer-events-none blur-sm' : 'scale-100 opacity-100 blur-0'}`}
       >
+         {/* Render Dock Apps */}
          {dockApps.map((app, index) => renderAppIcon(app, index, true))}
          
+         {/* Placeholder if empty (optional aesthetic) */}
          {dockApps.length === 0 && !isJiggleMode && (
              <div className="text-white/20 text-xs">Dock 空空如也</div>
          )}
