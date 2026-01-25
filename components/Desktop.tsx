@@ -22,12 +22,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const [isJiggleMode, setIsJiggleMode] = useState(false);
   
   // Drag State
-  // We keep activeDragIndex in state to handle z-index and conditional rendering (placeholder logic if we had it),
-  // but the actual position is now driven by the springSystem ref.
-  const [activeDragIndex, setActiveDragIndex] = useState<string | null>(null); // Changed to ID string for safety
+  const [activeDragIndex, setActiveDragIndex] = useState<string | null>(null); // App ID
   const [dragSource, setDragSource] = useState<'desktop' | 'dock' | null>(null);
 
-  // Physics System (Ref-based to support high-frequency RAF updates without re-renders)
+  // Physics System
   const springSystem = useRef({
     x: 0, y: 0,          // Current visual offset
     vx: 0, vy: 0,        // Velocity
@@ -45,6 +43,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const longPressTriggered = useRef(false);
   const itemsRef = useRef<Map<string, HTMLDivElement>>(new Map()); // Map by App ID
   const dockRef = useRef<HTMLDivElement>(null); 
+  
+  // Optimization: Cache rects to avoid reflows during drag
+  const cachedRects = useRef<Map<string, DOMRect>>(new Map());
 
   // Velocity Tracking Ref (Instantaneous velocity for throw)
   const velocityRef = useRef({ vx: 0, vy: 0, lastX: 0, lastY: 0, lastTime: 0 });
@@ -86,8 +87,8 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const [dockApps, setDockApps] = useState<AppItem[]>([]);
 
   // Physics Constants
-  const SPRING_STIFFNESS = 180;
-  const SPRING_DAMPING = 16;
+  const SPRING_STIFFNESS = 220; // Stiffer for snappier return
+  const SPRING_DAMPING = 20;
   const SPRING_MASS = 1;
   const DT = 1 / 60; // Standard 60fps step
 
@@ -99,15 +100,22 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     };
   }, []);
 
-  // --- Physics Loop ---
+  // --- Physics Loop (Run only when released or animating scale) ---
   const runSpringSimulation = () => {
     const state = springSystem.current;
 
-    // If we have an active drag item, update its DOM
+    // If active and dragging, we only animate SCALE in the loop (lifting effect)
+    // Position is handled directly in touchMove for zero latency
     if (activeDragIndex && state.active) {
-        // 1. Calculate Physics (if not being held by user)
+        
+        // --- SCALE PHYSICS (Always runs if active) ---
+        const fScale = -SPRING_STIFFNESS * (state.scale - state.targetScale) - SPRING_DAMPING * state.vScale;
+        const aScale = fScale / SPRING_MASS;
+        state.vScale += aScale * DT;
+        state.scale += state.vScale * DT;
+
+        // --- POSITION PHYSICS (Only if NOT dragging) ---
         if (!state.isDragging) {
-            // Position Spring
             const fx = -SPRING_STIFFNESS * (state.x - state.targetX) - SPRING_DAMPING * state.vx;
             const fy = -SPRING_STIFFNESS * (state.y - state.targetY) - SPRING_DAMPING * state.vy;
             const ax = fx / SPRING_MASS;
@@ -117,36 +125,51 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             state.vy += ay * DT;
             state.x += state.vx * DT;
             state.y += state.vy * DT;
-
-            // Scale Spring
-            const fScale = -SPRING_STIFFNESS * (state.scale - state.targetScale) - SPRING_DAMPING * state.vScale;
-            const aScale = fScale / SPRING_MASS;
-            state.vScale += aScale * DT;
-            state.scale += state.vScale * DT;
-
-            // Settle Check
-            const isPosSettled = Math.abs(state.x) < 0.5 && Math.abs(state.y) < 0.5 && Math.abs(state.vx) < 1 && Math.abs(state.vy) < 1;
-            const isScaleSettled = Math.abs(state.scale - state.targetScale) < 0.005 && Math.abs(state.vScale) < 0.05;
-
-            if (isPosSettled && isScaleSettled) {
-                // Snap to finish
-                state.x = 0; state.y = 0; state.vx = 0; state.vy = 0;
-                state.scale = 1; state.vScale = 0;
-                state.active = false;
-                
-                // End cycle
-                setActiveDragIndex(null); 
-                rafId.current = null;
-                return;
-            }
         }
 
-        // 2. Apply Transform
+        // Apply Transform
         const el = itemsRef.current.get(activeDragIndex);
         if (el) {
+            // If dragging, X/Y are updated by touchMove directly. 
+            // However, to keep scale animation smooth, we apply it here.
+            // But touchMove might have set a more recent X/Y. 
+            // To avoid conflict:
+            // 1. If dragging, we read current X/Y (which are set by touchMove) and just apply scale.
+            // 2. If not dragging, we apply the spring X/Y.
+            
+            // Actually, for pure 1:1, touchMove handles the transform. 
+            // We only need this loop for 'Settling' (finger up) OR 'Scaling' (pick up).
+            
+            // If dragging, let touchMove handle the Translation, this loop handles Scale?
+            // CSS Transform takes one string. We can't update separately.
+            // Strategy: touchMove updates state.x/y AND applies transform.
+            // This loop updates state.scale AND applies transform (using latest state.x/y).
+            // Since RAF and touchMove are async, it might be fine.
+            
             el.style.transform = `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`;
-            el.style.zIndex = "100"; // Ensure on top
-            el.style.transition = "none"; // Disable CSS transition
+            el.style.zIndex = "100";
+            el.style.transition = "none";
+        }
+
+        // Settle Check
+        const isPosSettled = Math.abs(state.x) < 0.5 && Math.abs(state.y) < 0.5 && Math.abs(state.vx) < 1 && Math.abs(state.vy) < 1;
+        const isScaleSettled = Math.abs(state.scale - state.targetScale) < 0.005 && Math.abs(state.vScale) < 0.05;
+
+        if (!state.isDragging && isPosSettled && isScaleSettled) {
+            // Snap to finish
+            state.x = 0; state.y = 0; state.vx = 0; state.vy = 0;
+            state.scale = 1; state.vScale = 0;
+            state.active = false;
+            
+            // Reset style to rely on CSS layout
+            if (el) {
+               el.style.transform = "";
+               el.style.zIndex = "";
+            }
+            
+            setActiveDragIndex(null); 
+            rafId.current = null;
+            return;
         }
         
         rafId.current = requestAnimationFrame(runSpringSimulation);
@@ -166,6 +189,12 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
       }
   };
 
+  const updateCachedRects = () => {
+    itemsRef.current.forEach((el, id) => {
+        cachedRects.current.set(id, el.getBoundingClientRect());
+    });
+  };
+
   const handleTouchStart = (e: React.TouchEvent, app: AppItem, source: 'desktop' | 'dock') => {
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
@@ -180,7 +209,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     longPressTriggered.current = false;
 
     if (isJiggleMode) {
-        // Interrupt any existing spring
+        // Cache layout immediately before dragging starts
+        updateCachedRects();
+
         setActiveDragIndex(app.id);
         setDragSource(source);
 
@@ -188,10 +219,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         state.isDragging = true;
         state.active = true;
         state.targetScale = 1.15; // Lift up effect
-        // Don't reset x/y, inherit them if we caught it mid-air
-        // But if it was static, x/y are 0.
         
-        // Start animating scale up
+        // Keep current visual position if it was already moving (rare), or start at 0
+        // Usually start at 0 relative to slot
         state.scale = state.scale || 1; 
         
         startSpringLoop();
@@ -200,6 +230,9 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             longPressTriggered.current = true;
             setIsJiggleMode(true);
             if (navigator.vibrate) navigator.vibrate(50);
+            
+            // If user holds without moving, enter drag mode under finger immediately?
+            // iOS style: yes.
         }, 500);
     }
   };
@@ -210,14 +243,13 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     const currentY = touch.clientY;
     const now = Date.now();
 
-    // Calculate Velocity (Moving Average for smoothness)
+    // Calculate Velocity
     const dt = now - velocityRef.current.lastTime;
     if (dt > 0) {
         const dx = currentX - velocityRef.current.lastX;
         const dy = currentY - velocityRef.current.lastY;
-        const vx = (dx / dt) * 60; // Normalize to px/frame
+        const vx = (dx / dt) * 60; 
         const vy = (dy / dt) * 60;
-        
         velocityRef.current.vx = vx * 0.4 + velocityRef.current.vx * 0.6;
         velocityRef.current.vy = vy * 0.4 + velocityRef.current.vy * 0.6;
     }
@@ -239,31 +271,28 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     if (isJiggleMode && activeDragIndex && dragSource && touchStartPos.current) {
         if (e.cancelable) e.preventDefault();
 
-        // 1. Update Physics State directly
+        // 1. Direct Mapping (No Physics Lag)
         const offsetX = currentX - touchStartPos.current.x;
         const offsetY = currentY - touchStartPos.current.y;
         
         springSystem.current.x = offsetX;
         springSystem.current.y = offsetY;
-        // We do NOT call setActiveDragIndex or setDragPosition here to avoid re-renders.
-        // The RAF loop handles the visual update.
-
-        // --- DOCK DETECTION ---
-        let currentRect: DOMRect | undefined;
-        if (dragSource === 'desktop') {
-            const el = itemsRef.current.get(activeDragIndex);
-            if (el) currentRect = el.getBoundingClientRect();
-        } else {
-             currentRect = { left: 0, top: 0, width: 60, height: 60 } as DOMRect; 
+        
+        // DIRECT DOM UPDATE
+        const el = itemsRef.current.get(activeDragIndex);
+        if (el) {
+            // Apply transform immediately, bypassing RAF loop for position
+            el.style.transform = `translate3d(${offsetX}px, ${offsetY}px, 0) scale(${springSystem.current.scale})`;
+            el.style.zIndex = "100";
+            el.style.transition = "none";
         }
 
+        // --- DOCK DETECTION ---
+        // Use cached rect for Dock if possible, or just bounds
         let isOverDock = false;
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
-            // Simple center point check
-            const absX = currentX;
-            const absY = currentY;
-            if (absX > dockRect.left && absX < dockRect.right && absY > dockRect.top && absY < dockRect.bottom) {
+            if (currentX > dockRect.left && currentX < dockRect.right && currentY > dockRect.top && currentY < dockRect.bottom) {
                 isOverDock = true;
             }
         }
@@ -272,94 +301,88 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
 
         // --- SWAP LOGIC ---
         if (dragSource === 'desktop') {
-            // Find current index in apps array
             const currentIndex = apps.findIndex(a => a.id === activeDragIndex);
             if (currentIndex === -1) return;
-
-            const currentSlotEl = itemsRef.current.get(activeDragIndex);
             
-            if (currentSlotEl) {
-                const dragRect = currentSlotEl.getBoundingClientRect(); // This gets the TRANSFORMED rect
-                const dragArea = dragRect.width * dragRect.height;
+            // Get current drag rect based on cache + offset
+            const currentSlotRect = cachedRects.current.get(activeDragIndex);
+            if (!currentSlotRect) return;
+
+            // Approximate visual center of dragged item
+            const dragCenterX = currentSlotRect.left + (currentSlotRect.width / 2) + offsetX;
+            const dragCenterY = currentSlotRect.top + (currentSlotRect.height / 2) + offsetY;
+
+            let maxScore = 0;
+            let bestTargetIndex = -1;
+
+            // Iterate apps to check intersection
+            // OPTIMIZATION: Use cachedRects instead of getBoundingClientRect()
+            apps.forEach((app, index) => {
+                if (app.id === activeDragIndex) return;
                 
-                let maxScore = 0;
-                let bestTargetIndex = -1;
+                const targetRect = cachedRects.current.get(app.id);
+                if (!targetRect) return;
 
-                // Check against all desktop items
-                apps.forEach((app, index) => {
-                    if (app.id === activeDragIndex) return;
-                    
-                    const targetEl = itemsRef.current.get(app.id);
-                    if (!targetEl) return;
-
-                    const targetRect = targetEl.getBoundingClientRect();
-                    
-                    // Intersection
-                    const interLeft = Math.max(dragRect.left, targetRect.left);
-                    const interTop = Math.max(dragRect.top, targetRect.top);
-                    const interRight = Math.min(dragRect.right, targetRect.right);
-                    const interBottom = Math.min(dragRect.bottom, targetRect.bottom);
-
-                    if (interRight > interLeft && interBottom > interTop) {
-                        const intersectionArea = (interRight - interLeft) * (interBottom - interTop);
-                        const ratio = intersectionArea / dragArea;
-                        let score = ratio;
-
-                        // Directional Heuristic
-                        if (ratio > 0.3) {
-                             // .. (Simplified directional logic could go here)
-                        }
-
-                        if (score > maxScore) {
-                            maxScore = score;
-                            bestTargetIndex = index;
-                        }
-                    }
-                });
-
-                if (bestTargetIndex !== -1 && maxScore > 0.5) {
-                     const targetSlotEl = itemsRef.current.get(apps[bestTargetIndex].id);
-                     if (targetSlotEl) {
-                         const targetRect = targetSlotEl.getBoundingClientRect();
-                         // We need the rect of the SLOT, effectively where the target element IS (without transform if it had one)
-                         // Since non-dragged items rely on CSS layout, getBoundingClientRect is correct.
-                         
-                         const oldRect = itemsRef.current.get(activeDragIndex)?.getBoundingClientRect();
-
-                         setApps(prev => {
-                             const newApps = [...prev];
-                             const [removed] = newApps.splice(currentIndex, 1);
-                             newApps.splice(bestTargetIndex, 0, removed);
-                             return newApps;
-                         });
-
-                         // COMPENSATE FOR LAYOUT SHIFT
-                         // When the DOM reorders, the 'activeDragIndex' element jumps to the new slot position.
-                         // We must subtract that jump from our springSystem.x/y to keep the icon visually static under finger.
-                         if (oldRect && touchStartPos.current) {
-                             // We estimate the jump based on center points of slots
-                             // Since we swapped, the new slot is where target was.
-                             // The drag offset needs to shift by (TargetPos - OldPos)
-                             // Actually, simpler: 
-                             // VisualPos = SlotPos + Offset.
-                             // We want VisualPos constant. SlotPos changed.
-                             // NewOffset = VisualPos - NewSlotPos
-                             // NewOffset = (OldSlotPos + OldOffset) - NewSlotPos
-                             // Delta = NewSlotPos - OldSlotPos
-                             // NewOffset = OldOffset - Delta
-                             
-                             const deltaX = targetRect.left - (oldRect.left - springSystem.current.x);
-                             const deltaY = targetRect.top - (oldRect.top - springSystem.current.y);
-                             
-                             springSystem.current.x -= deltaX;
-                             springSystem.current.y -= deltaY;
-                             touchStartPos.current.x += deltaX;
-                             touchStartPos.current.y += deltaY;
-                             
-                             if (navigator.vibrate) navigator.vibrate(10);
-                         }
+                // Simple point-in-rect check for cursor/center
+                // Or use intersection area
+                const isInside = 
+                   dragCenterX > targetRect.left && 
+                   dragCenterX < targetRect.right && 
+                   dragCenterY > targetRect.top && 
+                   dragCenterY < targetRect.bottom;
+                
+                // Distance based score to find closest center if multiple overlap
+                if (isInside) {
+                     const targetCenterX = targetRect.left + targetRect.width / 2;
+                     const targetCenterY = targetRect.top + targetRect.height / 2;
+                     const dist = Math.hypot(dragCenterX - targetCenterX, dragCenterY - targetCenterY);
+                     // Score is inverse of distance
+                     const score = 1000 - dist; 
+                     
+                     if (score > maxScore) {
+                         maxScore = score;
+                         bestTargetIndex = index;
                      }
                 }
+            });
+
+            if (bestTargetIndex !== -1) {
+                 const targetAppId = apps[bestTargetIndex].id;
+                 const targetRect = cachedRects.current.get(targetAppId);
+                 const oldRect = cachedRects.current.get(activeDragIndex);
+
+                 if (targetRect && oldRect) {
+                     setApps(prev => {
+                         const newApps = [...prev];
+                         const [removed] = newApps.splice(currentIndex, 1);
+                         newApps.splice(bestTargetIndex, 0, removed);
+                         return newApps;
+                     });
+                     
+                     // UPDATE CACHE MANUALLY
+                     // We swapped App A and App B. 
+                     // App A is now in Slot B. App B is in Slot A.
+                     // The cachedRect for App A should become Slot B's rect.
+                     cachedRects.current.set(activeDragIndex, targetRect);
+                     cachedRects.current.set(targetAppId, oldRect);
+
+                     // COMPENSATE FOR LAYOUT SHIFT
+                     // NewOffset = OldOffset - (NewSlotPos - OldSlotPos)
+                     const deltaX = targetRect.left - oldRect.left;
+                     const deltaY = targetRect.top - oldRect.top;
+                     
+                     springSystem.current.x -= deltaX;
+                     springSystem.current.y -= deltaY;
+                     touchStartPos.current.x += deltaX;
+                     touchStartPos.current.y += deltaY;
+                     
+                     // Force immediate update to prevent flicker
+                     if (el) {
+                         el.style.transform = `translate3d(${springSystem.current.x}px, ${springSystem.current.y}px, 0) scale(${springSystem.current.scale})`;
+                     }
+                     
+                     if (navigator.vibrate) navigator.vibrate(10);
+                 }
             }
         }
     }
@@ -409,7 +432,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
             }
         }
 
-        // --- PHYSICS RELEASE ---
+        // --- PHYSICS TAKEOVER (Phase 3) ---
         const state = springSystem.current;
         state.isDragging = false;
         state.targetX = 0;
@@ -420,7 +443,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         state.vx = velocityRef.current.vx;
         state.vy = velocityRef.current.vy;
 
-        // Ensure loop is running to settle
+        // Start Physics
         startSpringLoop();
     }
 
@@ -454,18 +477,15 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const renderAppIcon = (app: AppItem, index: number, isDock: boolean) => {
     const isDragging = app.id === activeDragIndex;
     
-    // If this item is the one being dragged/sprung, we disable React-controlled transition
-    // and let the Ref/RAF loop handle the transform.
-    // For others, we keep the smooth CSS transition for grid shuffling.
     const style: React.CSSProperties = {
         WebkitTouchCallout: 'none',
         WebkitUserSelect: 'none',
         userSelect: 'none',
-        // If dragging/physics is active for this item, remove transition so physics is immediate
+        // Critical: When dragging, we use direct manipulation (no transition).
+        // When settling (after drag), the Spring Loop handles it (no transition).
+        // Only other items get the CSS grid transition.
         transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
         zIndex: isDragging ? 100 : 'auto',
-        // We do NOT set transform here for the dragging item, effectively initializing it to 0,0 
-        // relative to slot, but the RAF loop will immediately override it.
         transform: isDragging ? undefined : 'translate(0,0) scale(1)', 
         touchAction: isDragging ? 'none' : 'auto',
     };
