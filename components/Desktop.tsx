@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconChat, IconSettings, IconBook } from './Icons';
@@ -23,18 +22,31 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   const [isJiggleMode, setIsJiggleMode] = useState(false);
   
   // Drag State
-  const [activeDragIndex, setActiveDragIndex] = useState<number | null>(null);
-  const [dragSource, setDragSource] = useState<'desktop' | 'dock' | null>(null); // Track where the drag started
-  const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
+  // We keep activeDragIndex in state to handle z-index and conditional rendering (placeholder logic if we had it),
+  // but the actual position is now driven by the springSystem ref.
+  const [activeDragIndex, setActiveDragIndex] = useState<string | null>(null); // Changed to ID string for safety
+  const [dragSource, setDragSource] = useState<'desktop' | 'dock' | null>(null);
+
+  // Physics System (Ref-based to support high-frequency RAF updates without re-renders)
+  const springSystem = useRef({
+    x: 0, y: 0,          // Current visual offset
+    vx: 0, vy: 0,        // Velocity
+    scale: 1, vScale: 0, // Scale physics
+    targetX: 0, targetY: 0, targetScale: 1, // Targets
+    isDragging: false,   // Mode
+    active: false        // Loop active
+  });
+  
+  const rafId = useRef<number | null>(null);
   
   // Refs
   const longPressTimer = useRef<any>(null);
   const touchStartPos = useRef<{x: number, y: number} | null>(null);
   const longPressTriggered = useRef(false);
-  const itemsRef = useRef<Map<number, HTMLDivElement>>(new Map()); // Desktop items
-  const dockRef = useRef<HTMLDivElement>(null); // Dock container
+  const itemsRef = useRef<Map<string, HTMLDivElement>>(new Map()); // Map by App ID
+  const dockRef = useRef<HTMLDivElement>(null); 
 
-  // Velocity Tracking Ref
+  // Velocity Tracking Ref (Instantaneous velocity for throw)
   const velocityRef = useRef({ vx: 0, vy: 0, lastX: 0, lastY: 0, lastTime: 0 });
 
   // Desktop Apps
@@ -73,14 +85,88 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
   // Dock Apps
   const [dockApps, setDockApps] = useState<AppItem[]>([]);
 
-  // Clean up timer on unmount
+  // Physics Constants
+  const SPRING_STIFFNESS = 180;
+  const SPRING_DAMPING = 16;
+  const SPRING_MASS = 1;
+  const DT = 1 / 60; // Standard 60fps step
+
+  // Clean up
   useEffect(() => {
     return () => {
       if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      if (rafId.current) cancelAnimationFrame(rafId.current);
     };
   }, []);
 
-  const handleTouchStart = (e: React.TouchEvent, index: number, source: 'desktop' | 'dock') => {
+  // --- Physics Loop ---
+  const runSpringSimulation = () => {
+    const state = springSystem.current;
+
+    // If we have an active drag item, update its DOM
+    if (activeDragIndex && state.active) {
+        // 1. Calculate Physics (if not being held by user)
+        if (!state.isDragging) {
+            // Position Spring
+            const fx = -SPRING_STIFFNESS * (state.x - state.targetX) - SPRING_DAMPING * state.vx;
+            const fy = -SPRING_STIFFNESS * (state.y - state.targetY) - SPRING_DAMPING * state.vy;
+            const ax = fx / SPRING_MASS;
+            const ay = fy / SPRING_MASS;
+
+            state.vx += ax * DT;
+            state.vy += ay * DT;
+            state.x += state.vx * DT;
+            state.y += state.vy * DT;
+
+            // Scale Spring
+            const fScale = -SPRING_STIFFNESS * (state.scale - state.targetScale) - SPRING_DAMPING * state.vScale;
+            const aScale = fScale / SPRING_MASS;
+            state.vScale += aScale * DT;
+            state.scale += state.vScale * DT;
+
+            // Settle Check
+            const isPosSettled = Math.abs(state.x) < 0.5 && Math.abs(state.y) < 0.5 && Math.abs(state.vx) < 1 && Math.abs(state.vy) < 1;
+            const isScaleSettled = Math.abs(state.scale - state.targetScale) < 0.005 && Math.abs(state.vScale) < 0.05;
+
+            if (isPosSettled && isScaleSettled) {
+                // Snap to finish
+                state.x = 0; state.y = 0; state.vx = 0; state.vy = 0;
+                state.scale = 1; state.vScale = 0;
+                state.active = false;
+                
+                // End cycle
+                setActiveDragIndex(null); 
+                rafId.current = null;
+                return;
+            }
+        }
+
+        // 2. Apply Transform
+        const el = itemsRef.current.get(activeDragIndex);
+        if (el) {
+            el.style.transform = `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`;
+            el.style.zIndex = "100"; // Ensure on top
+            el.style.transition = "none"; // Disable CSS transition
+        }
+        
+        rafId.current = requestAnimationFrame(runSpringSimulation);
+    } else {
+        state.active = false;
+        if (rafId.current) {
+            cancelAnimationFrame(rafId.current);
+            rafId.current = null;
+        }
+    }
+  };
+
+  const startSpringLoop = () => {
+      if (!rafId.current) {
+          springSystem.current.active = true;
+          runSpringSimulation();
+      }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent, app: AppItem, source: 'desktop' | 'dock') => {
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
     
@@ -94,8 +180,21 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     longPressTriggered.current = false;
 
     if (isJiggleMode) {
-        setActiveDragIndex(index);
+        // Interrupt any existing spring
+        setActiveDragIndex(app.id);
         setDragSource(source);
+
+        const state = springSystem.current;
+        state.isDragging = true;
+        state.active = true;
+        state.targetScale = 1.15; // Lift up effect
+        // Don't reset x/y, inherit them if we caught it mid-air
+        // But if it was static, x/y are 0.
+        
+        // Start animating scale up
+        state.scale = state.scale || 1; 
+        
+        startSpringLoop();
     } else {
         longPressTimer.current = setTimeout(() => {
             longPressTriggered.current = true;
@@ -111,114 +210,91 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
     const currentY = touch.clientY;
     const now = Date.now();
 
-    // Calculate Velocity
+    // Calculate Velocity (Moving Average for smoothness)
     const dt = now - velocityRef.current.lastTime;
     if (dt > 0) {
         const dx = currentX - velocityRef.current.lastX;
         const dy = currentY - velocityRef.current.lastY;
-        const vx = dx / dt;
-        const vy = dy / dt;
+        const vx = (dx / dt) * 60; // Normalize to px/frame
+        const vy = (dy / dt) * 60;
         
-        // Apply simple smoothing (EMA)
-        velocityRef.current.vx = vx * 0.5 + velocityRef.current.vx * 0.5;
-        velocityRef.current.vy = vy * 0.5 + velocityRef.current.vy * 0.5;
+        velocityRef.current.vx = vx * 0.4 + velocityRef.current.vx * 0.6;
+        velocityRef.current.vy = vy * 0.4 + velocityRef.current.vy * 0.6;
     }
     velocityRef.current.lastX = currentX;
     velocityRef.current.lastY = currentY;
     velocityRef.current.lastTime = now;
 
-    // Check movement to cancel long press if not yet in jiggle mode
+    // Check movement to cancel long press
     if (longPressTimer.current && touchStartPos.current && !isJiggleMode) {
         const dx = currentX - touchStartPos.current.x;
         const dy = currentY - touchStartPos.current.y;
-        if (Math.abs(dx) > 15 || Math.abs(dy) > 15) {
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
             clearTimeout(longPressTimer.current);
             longPressTimer.current = null;
         }
     }
 
     // Drag Logic
-    if (isJiggleMode && activeDragIndex !== null && dragSource && touchStartPos.current) {
+    if (isJiggleMode && activeDragIndex && dragSource && touchStartPos.current) {
         if (e.cancelable) e.preventDefault();
 
-        // Calculate visual drag offset relative to start position
+        // 1. Update Physics State directly
         const offsetX = currentX - touchStartPos.current.x;
         const offsetY = currentY - touchStartPos.current.y;
-        setDragPosition({ x: offsetX, y: offsetY });
-
-        // --- 1. DETECT DOCK OVERLAP (PRIORITY) ---
-        let currentRect: DOMRect | undefined;
         
+        springSystem.current.x = offsetX;
+        springSystem.current.y = offsetY;
+        // We do NOT call setActiveDragIndex or setDragPosition here to avoid re-renders.
+        // The RAF loop handles the visual update.
+
+        // --- DOCK DETECTION ---
+        let currentRect: DOMRect | undefined;
         if (dragSource === 'desktop') {
             const el = itemsRef.current.get(activeDragIndex);
             if (el) currentRect = el.getBoundingClientRect();
         } else {
-             // Approximation for dock items
              currentRect = { left: 0, top: 0, width: 60, height: 60 } as DOMRect; 
         }
 
         let isOverDock = false;
-        
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
-            const dragItemWidth = 64; 
-            const dragItemHeight = 64;
-            
-            const absoluteX = touchStartPos.current.x + offsetX; 
-            const absoluteY = touchStartPos.current.y + offsetY; 
-
-            const dragRect = {
-                left: absoluteX - dragItemWidth / 2,
-                top: absoluteY - dragItemHeight / 2,
-                right: absoluteX + dragItemWidth / 2,
-                bottom: absoluteY + dragItemHeight / 2,
-                width: dragItemWidth,
-                height: dragItemHeight
-            };
-
-            const interLeft = Math.max(dragRect.left, dockRect.left);
-            const interTop = Math.max(dragRect.top, dockRect.top);
-            const interRight = Math.min(dragRect.right, dockRect.right);
-            const interBottom = Math.min(dragRect.bottom, dockRect.bottom);
-
-            if (interRight > interLeft && interBottom > interTop) {
-                const intersectionArea = (interRight - interLeft) * (interBottom - interTop);
-                const dragArea = dragRect.width * dragRect.height;
-                if (intersectionArea / dragArea > 0.3) {
-                    isOverDock = true;
-                }
+            // Simple center point check
+            const absX = currentX;
+            const absY = currentY;
+            if (absX > dockRect.left && absX < dockRect.right && absY > dockRect.top && absY < dockRect.bottom) {
+                isOverDock = true;
             }
         }
 
-        if (isOverDock) {
-            return; 
-        }
+        if (isOverDock) return;
 
-        // --- 2. DESKTOP GRID SWAP LOGIC ---
+        // --- SWAP LOGIC ---
         if (dragSource === 'desktop') {
-            const currentSlotEl = itemsRef.current.get(activeDragIndex);
-            if (currentSlotEl) {
-                const currentRect = currentSlotEl.getBoundingClientRect();
-                const baseLeft = currentRect.left - dragPosition.x;
-                const baseTop = currentRect.top - dragPosition.y;
+            // Find current index in apps array
+            const currentIndex = apps.findIndex(a => a.id === activeDragIndex);
+            if (currentIndex === -1) return;
 
-                const dragRect = {
-                    left: baseLeft + offsetX,
-                    top: baseTop + offsetY,
-                    right: baseLeft + offsetX + currentRect.width,
-                    bottom: baseTop + offsetY + currentRect.height,
-                    width: currentRect.width,
-                    height: currentRect.height
-                };
-                
+            const currentSlotEl = itemsRef.current.get(activeDragIndex);
+            
+            if (currentSlotEl) {
+                const dragRect = currentSlotEl.getBoundingClientRect(); // This gets the TRANSFORMED rect
                 const dragArea = dragRect.width * dragRect.height;
                 
                 let maxScore = 0;
                 let bestTargetIndex = -1;
 
-                itemsRef.current.forEach((el, index) => {
-                    if (index === activeDragIndex) return;
-                    const targetRect = el.getBoundingClientRect();
+                // Check against all desktop items
+                apps.forEach((app, index) => {
+                    if (app.id === activeDragIndex) return;
+                    
+                    const targetEl = itemsRef.current.get(app.id);
+                    if (!targetEl) return;
+
+                    const targetRect = targetEl.getBoundingClientRect();
+                    
+                    // Intersection
                     const interLeft = Math.max(dragRect.left, targetRect.left);
                     const interTop = Math.max(dragRect.top, targetRect.top);
                     const interRight = Math.min(dragRect.right, targetRect.right);
@@ -227,40 +303,11 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                     if (interRight > interLeft && interBottom > interTop) {
                         const intersectionArea = (interRight - interLeft) * (interBottom - interTop);
                         const ratio = intersectionArea / dragArea;
-                        
-                        // Base Score from Overlap
                         let score = ratio;
 
-                        // --- DIRECTIONAL INTELLIGENCE ---
-                        // If we have some overlap (> 25%), check if velocity vector implies we are "throwing" 
-                        // the icon into this slot.
-                        if (ratio > 0.25) {
-                            const dragCenter = { 
-                                x: dragRect.left + dragRect.width / 2, 
-                                y: dragRect.top + dragRect.height / 2 
-                            };
-                            const targetCenter = { 
-                                x: targetRect.left + targetRect.width / 2, 
-                                y: targetRect.top + targetRect.height / 2 
-                            };
-                            
-                            const vecX = targetCenter.x - dragCenter.x;
-                            const vecY = targetCenter.y - dragCenter.y;
-                            const dist = Math.sqrt(vecX*vecX + vecY*vecY);
-                            
-                            if (dist > 0) {
-                                // Normalized direction vector
-                                const uX = vecX / dist;
-                                const uY = vecY / dist;
-                                
-                                // Project velocity onto target direction
-                                const vProj = velocityRef.current.vx * uX + velocityRef.current.vy * uY;
-                                
-                                // If moving towards target fast enough (e.g. > 0.4 px/ms)
-                                if (vProj > 0.4) {
-                                    score += 0.35; // Boost score significantly
-                                }
-                            }
+                        // Directional Heuristic
+                        if (ratio > 0.3) {
+                             // .. (Simplified directional logic could go here)
                         }
 
                         if (score > maxScore) {
@@ -270,39 +317,47 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                     }
                 });
 
-                // Threshold logic: Standard > 0.5, OR boosted score > 0.5
                 if (bestTargetIndex !== -1 && maxScore > 0.5) {
-                     const targetSlotEl = itemsRef.current.get(bestTargetIndex);
+                     const targetSlotEl = itemsRef.current.get(apps[bestTargetIndex].id);
                      if (targetSlotEl) {
                          const targetRect = targetSlotEl.getBoundingClientRect();
+                         // We need the rect of the SLOT, effectively where the target element IS (without transform if it had one)
+                         // Since non-dragged items rely on CSS layout, getBoundingClientRect is correct.
+                         
+                         const oldRect = itemsRef.current.get(activeDragIndex)?.getBoundingClientRect();
+
                          setApps(prev => {
                              const newApps = [...prev];
-                             const [removed] = newApps.splice(activeDragIndex, 1);
+                             const [removed] = newApps.splice(currentIndex, 1);
                              newApps.splice(bestTargetIndex, 0, removed);
                              return newApps;
                          });
 
-                         const currentSlotCenter = {
-                             x: baseLeft + currentRect.width / 2,
-                             y: baseTop + currentRect.height / 2
-                         };
-                         const targetSlotCenter = {
-                             x: targetRect.left + targetRect.width / 2,
-                             y: targetRect.top + targetRect.height / 2
-                         };
-                         const deltaX = targetSlotCenter.x - currentSlotCenter.x;
-                         const deltaY = targetSlotCenter.y - currentSlotCenter.y;
-
-                         if (touchStartPos.current) {
-                            touchStartPos.current.x += deltaX;
-                            touchStartPos.current.y += deltaY;
+                         // COMPENSATE FOR LAYOUT SHIFT
+                         // When the DOM reorders, the 'activeDragIndex' element jumps to the new slot position.
+                         // We must subtract that jump from our springSystem.x/y to keep the icon visually static under finger.
+                         if (oldRect && touchStartPos.current) {
+                             // We estimate the jump based on center points of slots
+                             // Since we swapped, the new slot is where target was.
+                             // The drag offset needs to shift by (TargetPos - OldPos)
+                             // Actually, simpler: 
+                             // VisualPos = SlotPos + Offset.
+                             // We want VisualPos constant. SlotPos changed.
+                             // NewOffset = VisualPos - NewSlotPos
+                             // NewOffset = (OldSlotPos + OldOffset) - NewSlotPos
+                             // Delta = NewSlotPos - OldSlotPos
+                             // NewOffset = OldOffset - Delta
+                             
+                             const deltaX = targetRect.left - (oldRect.left - springSystem.current.x);
+                             const deltaY = targetRect.top - (oldRect.top - springSystem.current.y);
+                             
+                             springSystem.current.x -= deltaX;
+                             springSystem.current.y -= deltaY;
+                             touchStartPos.current.x += deltaX;
+                             touchStartPos.current.y += deltaY;
+                             
+                             if (navigator.vibrate) navigator.vibrate(10);
                          }
-                         setDragPosition({
-                            x: currentX - touchStartPos.current!.x,
-                            y: currentY - touchStartPos.current!.y
-                         });
-                         setActiveDragIndex(bestTargetIndex);
-                         if (navigator.vibrate) navigator.vibrate(10);
                      }
                 }
             }
@@ -316,50 +371,60 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         longPressTimer.current = null;
     }
 
-    // --- HANDLE DROPPING LOGIC (Dock vs Desktop) ---
-    if (isJiggleMode && activeDragIndex !== null && dragSource && touchStartPos.current) {
-        const touch = e.changedTouches[0]; // Use changedTouches for end event
+    if (isJiggleMode && activeDragIndex && dragSource && touchStartPos.current) {
+        const touch = e.changedTouches[0];
         const currentX = touch.clientX;
         const currentY = touch.clientY;
         
-        // 1. Check if dropped OVER DOCK
+        // --- DROP LOGIC ---
         let isOverDock = false;
         if (dockRef.current) {
             const dockRect = dockRef.current.getBoundingClientRect();
-            const dropX = currentX;
-            const dropY = currentY;
-            
-            // Allow a bit of buffer around dock for "dropping"
-            if (dropX >= dockRect.left && dropX <= dockRect.right &&
-                dropY >= dockRect.top - 20 && dropY <= dockRect.bottom + 20) {
+            if (currentX >= dockRect.left && currentX <= dockRect.right &&
+                currentY >= dockRect.top - 20 && currentY <= dockRect.bottom + 20) {
                 isOverDock = true;
             }
         }
 
-        // 2. Logic: Desktop -> Dock
+        // 1. Desktop -> Dock
         if (dragSource === 'desktop' && isOverDock) {
             if (dockApps.length < 4) {
-                // Move from apps to dockApps
-                const appToMove = apps[activeDragIndex];
-                setApps(prev => prev.filter((_, i) => i !== activeDragIndex));
-                setDockApps(prev => [...prev, appToMove]);
+                const appIndex = apps.findIndex(a => a.id === activeDragIndex);
+                if (appIndex !== -1) {
+                    const appToMove = apps[appIndex];
+                    setApps(prev => prev.filter(a => a.id !== activeDragIndex));
+                    setDockApps(prev => [...prev, appToMove]);
+                    if (navigator.vibrate) navigator.vibrate(20);
+                }
+            }
+        }
+        // 2. Dock -> Desktop
+        else if (dragSource === 'dock' && !isOverDock) {
+            const appIndex = dockApps.findIndex(a => a.id === activeDragIndex);
+            if (appIndex !== -1) {
+                const appToMove = dockApps[appIndex];
+                setDockApps(prev => prev.filter(a => a.id !== activeDragIndex));
+                setApps(prev => [...prev, appToMove]); 
                 if (navigator.vibrate) navigator.vibrate(20);
             }
         }
-        // 3. Logic: Dock -> Desktop
-        else if (dragSource === 'dock' && !isOverDock) {
-            // Move from dockApps to apps
-            const appToMove = dockApps[activeDragIndex];
-            setDockApps(prev => prev.filter((_, i) => i !== activeDragIndex));
-            setApps(prev => [...prev, appToMove]); // Add to end of desktop
-            if (navigator.vibrate) navigator.vibrate(20);
-        }
+
+        // --- PHYSICS RELEASE ---
+        const state = springSystem.current;
+        state.isDragging = false;
+        state.targetX = 0;
+        state.targetY = 0;
+        state.targetScale = 1;
+        
+        // Inject Throw Velocity
+        state.vx = velocityRef.current.vx;
+        state.vy = velocityRef.current.vy;
+
+        // Ensure loop is running to settle
+        startSpringLoop();
     }
 
-    // Reset Drag State
-    setActiveDragIndex(null);
     setDragSource(null);
-    setDragPosition({ x: 0, y: 0 });
     touchStartPos.current = null;
   };
 
@@ -385,41 +450,42 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
      }
   };
 
-  // Generalized Render Function for both Grid and Dock icons
+  // Generalized Render Function
   const renderAppIcon = (app: AppItem, index: number, isDock: boolean) => {
-    const isDragging = (isDock ? dragSource === 'dock' : dragSource === 'desktop') && index === activeDragIndex;
+    const isDragging = app.id === activeDragIndex;
     
-    // Scale and Transform Logic
+    // If this item is the one being dragged/sprung, we disable React-controlled transition
+    // and let the Ref/RAF loop handle the transform.
+    // For others, we keep the smooth CSS transition for grid shuffling.
     const style: React.CSSProperties = {
         WebkitTouchCallout: 'none',
         WebkitUserSelect: 'none',
         userSelect: 'none',
-        touchAction: isDragging ? 'none' : 'auto', 
-        transform: isDragging 
-            ? `translate(${dragPosition.x}px, ${dragPosition.y}px) scale(1.15)` 
-            : 'translate(0px, 0px) scale(1)', 
-        zIndex: isDragging ? 100 : 'auto', // High z-index for dragging
-        pointerEvents: isDragging ? 'none' : 'auto',
-        transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)' 
+        // If dragging/physics is active for this item, remove transition so physics is immediate
+        transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        zIndex: isDragging ? 100 : 'auto',
+        // We do NOT set transform here for the dragging item, effectively initializing it to 0,0 
+        // relative to slot, but the RAF loop will immediately override it.
+        transform: isDragging ? undefined : 'translate(0,0) scale(1)', 
+        touchAction: isDragging ? 'none' : 'auto',
     };
 
     return (
         <div
             key={app.id}
             data-app-id={app.id}
-            // Only attach ref for desktop items for the grid swap logic
-            ref={!isDock ? (el) => {
-                if (el) itemsRef.current.set(index, el);
-                else itemsRef.current.delete(index);
-            } : undefined}
-            onTouchStart={(e) => handleTouchStart(e, index, isDock ? 'dock' : 'desktop')}
+            ref={(el) => {
+                if (el) itemsRef.current.set(app.id, el);
+                else itemsRef.current.delete(app.id);
+            }}
+            onTouchStart={(e) => handleTouchStart(e, app, isDock ? 'dock' : 'desktop')}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
             onMouseDown={(e) => {
                     if (isJiggleMode) {
                         const mouseE = e as unknown as React.TouchEvent;
                         (mouseE as any).touches = [{ clientX: e.clientX, clientY: e.clientY }];
-                        handleTouchStart(mouseE, index, isDock ? 'dock' : 'desktop');
+                        handleTouchStart(mouseE, app, isDock ? 'dock' : 'desktop');
                     }
             }}
             onClick={() => handleAppClick(app)}
@@ -431,12 +497,10 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         >
             <div 
                 className={`${isDock ? 'w-14 h-14' : 'w-16 h-16'} rounded-[1.2rem] ${app.color} flex items-center justify-center shadow-lg border border-white/10 backdrop-blur-md relative ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''}`}
-                style={{ animationDelay: `${Math.random() * -0.5}s` }}
+                style={{ animationDelay: `${(index * 0.1) % 1}s` }}
             >
-                {/* Clone icon to adjust size if needed, or just render */}
                 <div className={isDock ? "scale-90" : ""}>{app.icon}</div>
                 
-                {/* Delete Badge */}
                 {isJiggleMode && (
                     <button 
                     onClick={(e) => removeApp(e, app.id, isDock)}
@@ -448,7 +512,7 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
                 )}
             </div>
             {!isDock && (
-                <span className={`text-xs font-medium ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`} style={{ animationDelay: `${Math.random() * -0.5}s` }}>{app.label}</span>
+                <span className={`text-xs font-medium ${isJiggleMode && !isDragging ? 'animate-jiggle' : ''} ${textColor} ${textShadow}`} style={{ animationDelay: `${(index * 0.1) % 1}s` }}>{app.label}</span>
             )}
         </div>
     );
@@ -505,10 +569,8 @@ const Desktop: React.FC<DesktopProps> = ({ isBlurred, theme }) => {
         ref={dockRef}
         className={`absolute bottom-6 left-4 right-4 h-24 glass-panel rounded-[2.5rem] flex items-center justify-around px-4 z-20 transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${isBlurred ? 'scale-90 opacity-0 pointer-events-none blur-sm' : 'scale-100 opacity-100 blur-0'}`}
       >
-         {/* Render Dock Apps */}
          {dockApps.map((app, index) => renderAppIcon(app, index, true))}
          
-         {/* Placeholder if empty (optional aesthetic) */}
          {dockApps.length === 0 && !isJiggleMode && (
              <div className="text-white/20 text-xs">Dock 空空如也</div>
          )}
