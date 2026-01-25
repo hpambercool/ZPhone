@@ -33,6 +33,26 @@ const INITIAL_CONTACTS: Contact[] = [
   }
 ];
 
+// Helper component for the gesture bar defined outside to prevent re-renders
+const HomeIndicator = ({ onClick }: { onClick: () => void }) => (
+  <div 
+    className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-white/40 rounded-full z-50 cursor-pointer hover:bg-white/60 transition-all active:scale-95 active:bg-white active:w-32" 
+    onClick={(e) => { e.stopPropagation(); onClick(); }}
+  ></div>
+);
+
+// Common wrapper defined outside App to maintain component identity
+const AppWindow = ({ show, children, theme, onClose }: { show: boolean; children?: React.ReactNode; theme: ThemeMode; onClose: () => void }) => (
+  <div 
+    className={`fixed inset-0 z-20 flex flex-col w-full h-[100dvh] overflow-hidden transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
+      show ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+    } ${theme === 'dark' ? 'bg-black' : 'bg-[#F2F2F7]'}`}
+  >
+    {children}
+    <HomeIndicator onClick={onClose} />
+  </div>
+);
+
 const App = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -111,19 +131,7 @@ const App = () => {
   // Helper to determine if a specific app should be visible
   const isVisible = (path: string) => location.pathname.startsWith(path);
 
-  // Common wrapper for Apps to handle the slide animation and background
-  // Defining children as optional to avoid strict type checking issues on call sites
-  const AppWindow = ({ show, children }: { show: boolean; children?: React.ReactNode }) => (
-    <div 
-      className={`fixed inset-0 z-20 flex flex-col w-full h-[100dvh] overflow-hidden transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1) will-change-transform ${
-        show ? 'translate-y-0' : 'translate-y-full pointer-events-none'
-      } ${theme === 'dark' ? 'bg-black' : 'bg-[#F2F2F7]'}`}
-    >
-      {children}
-      <HomeIndicator onClick={() => navigate('/')} />
-    </div>
-  );
-
+  const handleCloseApp = () => navigate('/');
   const noopClose = () => {};
 
   return (
@@ -141,7 +149,8 @@ const App = () => {
       */}
 
       {/* Chat App Window */}
-      <AppWindow show={isVisible('/chat')}>
+      {isVisible('/chat') && (
+       <AppWindow show={true} theme={theme} onClose={handleCloseApp}>
         <ChatApp 
           config={config} 
           setConfig={setConfig}
@@ -151,9 +160,11 @@ const App = () => {
           theme={theme}
         />
       </AppWindow>
+      )}
 
       {/* WorldBook App Window */}
-      <AppWindow show={isVisible('/worldbook')}>
+      {isVisible('/worldbook') && (
+       <AppWindow show={true} theme={theme} onClose={handleCloseApp}>
         <WorldBookApp 
           entries={worldBook} 
           setEntries={setWorldBook} 
@@ -162,9 +173,11 @@ const App = () => {
           theme={theme}
         />
       </AppWindow>
+      )}
 
       {/* Settings App Window */}
-      <AppWindow show={isVisible('/settings')}>
+      {isVisible('/settings') && (
+       <AppWindow show={true} theme={theme} onClose={handleCloseApp}>
         <SettingsApp 
           config={config} 
           setConfig={setConfig} 
@@ -173,16 +186,9 @@ const App = () => {
           closeApp={noopClose}
         />
       </AppWindow>
+      )}
     </div>
   );
 };
-
-// Helper component for the gesture bar
-const HomeIndicator = ({ onClick }: { onClick: () => void }) => (
-  <div 
-    className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-white/40 rounded-full z-50 cursor-pointer hover:bg-white/60 transition-all active:scale-95 active:bg-white active:w-32" 
-    onClick={(e) => { e.stopPropagation(); onClick(); }}
-  ></div>
-);
 
 export default App;

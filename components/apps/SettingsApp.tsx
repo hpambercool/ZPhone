@@ -266,7 +266,7 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
               </div>
 
               {/* Model Selection (Dependent on connection) */}
-              <div className={`${bgPanel} p-5 rounded-2xl transition-opacity ${connectionStatus === 'success' || availableModels.length > 0 ? 'opacity-100' : 'opacity-50'}`}>
+              <div className={`${bgPanel} p-5 rounded-2xl transition-opacity ${connectionStatus === 'success' || availableModels.length > 0 ? 'opacity-100' : 'opacity-100'}`}>
                 <h2 className={`text-xs font-bold uppercase tracking-wider mb-4 ${textSecondary}`}>模型选择</h2>
                 <div className="relative">
                     <select
@@ -274,16 +274,12 @@ const SettingsApp: React.FC<SettingsAppProps> = ({ config, setConfig, theme, set
                         onChange={(e) => setConfig({ ...config, model: e.target.value })}
                         className={`w-full rounded-lg p-3 text-sm focus:outline-none border appearance-none ${bgInput}`}
                     >
-                        <option value={config.model}>{config.model} (当前)</option>
                         {availableModels.length > 0 ? (
                             availableModels.map(m => (
                                 <option key={m} value={m}>{m}</option>
                             ))
                         ) : (
-                            <>
-                                <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
-                                <option value="gemini-3-pro-preview">Gemini 3.0 Pro</option>
-                            </>
+                            <option value={config.model || ""}>{config.model ? `${config.model} (未连接)` : "无 (请先连接)"}</option>
                         )}
                     </select>
                     <div className={`absolute right-3 top-3 pointer-events-none ${isDark ? 'text-white/50' : 'text-slate-400'}`}>▼</div>
